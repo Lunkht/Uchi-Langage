@@ -4,12 +4,14 @@
  *   uchi run <fichier.uchi> [args...]   execute un script
  *   uchi repl                            ouvre l'interpreteur interactif
  *   uchi check <fichier.uchi>            analyse sans executer
+ *   uchi gui [dossier]                   ouvre l'editeur web
  *   uchi version                         affiche la version
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { UchiThrow, UchiSyntaxError } from './errors.ts';
+import { defaultRoot, openBrowser, openEditor } from './gui/index.ts';
 import { Interpreter } from './interpreter/interpreter.ts';
 import { toRepr, toStr } from './interpreter/operations.ts';
 import { UchiError, UchiInstance, type UchiValue } from './interpreter/values.ts';
@@ -22,6 +24,7 @@ Utilisation :
   uchi run <fichier.uchi> [arguments...]   execute un script
   uchi repl                                ouvre l'interpreteur interactif
   uchi check <fichier.uchi>                analyse le fichier sans l'executer
+  uchi gui [dossier] [--port N] [--no-open] ouvre l'editeur web
   uchi -e "<code>"                         execute un fragment de code
   uchi version                             affiche la version
   uchi help                                affiche cette aide
@@ -37,7 +40,13 @@ export function main(argv: string[]): number {
       return replCommand(rest);
     case 'check':
       return checkCommand(rest);
-    case '-e':
+    case 'gui':
+      // Le demarrage du serveur est asynchrone : le code de sortie est fourni
+      // plus tard, quand l'editeur s'arrete.
+      void guiCommand(rest).then((code) => {
+        process.exitCode = code;
+      });
+      return 0;    case '-e':
       return evalCommand(rest);
     case 'version':
     case '--version':
@@ -106,6 +115,51 @@ function checkCommand(args: string[]): number {
     return 0;
   } catch (thrown) {
     return reportError(null, thrown, path);
+  }
+}
+
+/**
+ * Editeur web : un serveur local sans dependance, ouvert dans le navigateur.
+ * Le processus reste vivant jusqu'a l'arret du serveur par Ctrl+C.
+ */
+async function guiCommand(args: string[]): Promise<number> {
+  const options = { root: defaultRoot(), port: 0, open: true };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] as string;
+    if (arg === '--port') {
+      const port = Number(args[++i]);
+      if (!Number.isInteger(port) || port < 0 || port > 65535) {
+        process.stderr.write('Erreur : --port attend un numero de port valide.\n');
+        return 2;
+      }
+      options.port = port;
+    } else if (arg === '--no-open') {
+      options.open = false;
+    } else if (arg.startsWith('-')) {
+      process.stderr.write(`Option inconnue : '${arg}'\n`);
+      return 2;
+    } else {
+      options.root = resolve(arg);
+    }
+  }
+  if (!existsSync(options.root)) {
+    process.stderr.write(`Erreur : dossier introuvable : '${options.root}'\n`);
+    return 2;
+  }
+
+  try {
+    const server = await openEditor({ root: options.root, port: options.port });
+    process.stdout.write(`Uchi ${UCHI_VERSION} — editeur\n`);
+    process.stdout.write(`  dossier : ${server.root}\n`);
+    process.stdout.write(`  adresse : ${server.url}\n`);
+    process.stdout.write('Ctrl+C pour arreter.\n');
+    if (options.open) openBrowser(server.url);
+    // Le serveur ecoute indefiniment : c'est la boucle d'evenements qui tient.
+    await new Promise<void>(() => {});
+    return 0;
+  } catch (error) {
+    process.stderr.write(`Erreur : ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
   }
 }
 

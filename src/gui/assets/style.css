@@ -1,0 +1,233 @@
+/* Éditeur Uchi : thème sombre, mise en page à trois zones. */
+:root {
+  --fond: #14161c;
+  --fond-2: #1a1d25;
+  --fond-3: #222631;
+  --texte: #d7dae2;
+  --texte-2: #8b93a5;
+  --bord: #2b303c;
+  --accent: #6ea8fe;
+  --accent-2: #2f6fd0;
+  --erreur: #f2777a;
+  --mot: #c98bdf;
+  --chaine: #98c379;
+  --nombre: #d19a66;
+  --commentaire: #6a7383;
+  --police: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--fond);
+  color: var(--texte);
+  font-family: var(--police);
+  font-size: 14px;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ bandeau */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--fond-2);
+  border-bottom: 1px solid var(--bord);
+}
+
+.marque {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.racine, .file, .etat {
+  color: var(--texte-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file { color: var(--texte); }
+.etat { color: var(--dore, #d19a66); font-size: 12px; }
+.etat.sale { color: #d19a66; }
+
+.actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+button {
+  font: inherit;
+  color: var(--texte);
+  background: var(--fond-3);
+  border: 1px solid var(--bord);
+  border-radius: 5px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--accent-2); color: #fff; }
+button:active { transform: translateY(1px); }
+
+/* -------------------------------------------------------------------- corps */
+
+.corps {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 0;
+}
+
+.panneau {
+  background: var(--fond-2);
+  border-right: 1px solid var(--bord);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#filtre {
+  font: inherit;
+  margin: 8px;
+  padding: 5px 8px;
+  color: var(--texte);
+  background: var(--fond);
+  border: 1px solid var(--bord);
+  border-radius: 5px;
+}
+
+.arbre {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 12px;
+  overflow: auto;
+  flex: 1;
+}
+
+.arbre li {
+  padding: 3px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--texte);
+}
+
+.arbre li.dossier { color: var(--texte-2); cursor: default; }
+.arbre li:hover:not(.dossier):not(.actif) { background: var(--fond-3); }
+.arbre li.actif { background: var(--accent-2); color: #fff; }
+.arbre li.taille::after {
+  content: attr(data-taille);
+  float: right;
+  color: var(--texte-2);
+  font-size: 11px;
+  margin-left: 8px;
+}
+
+/* ------------------------------------------------------------------ éditeur */
+
+.editeur {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gouttiere {
+  overflow: hidden;
+  padding: 10px 8px 10px 12px;
+  background: var(--fond-2);
+  border-right: 1px solid var(--bord);
+  color: var(--texte-2);
+  font-size: 14px;
+  /* La meme hauteur de ligne que la saisie et la surcouche : les numeros
+     restent alignes sur le code. */
+  line-height: 1.5;
+  text-align: right;
+  user-select: none;
+  white-space: pre;
+}
+
+.gouttiere .ligne-erreur { color: var(--erreur); font-weight: 700; }
+
+.zone {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* La surcouche et la saisie partagent exactement la meme mise en page : la
+   surcouche affiche les couleurs, la saisie reste le champ editable. */
+.surcouche, #saisie {
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  font-family: var(--police);
+  font-size: 14px;
+  line-height: 1.5;
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+}
+
+.surcouche {
+  position: absolute;
+  inset: 0;
+  color: var(--texte);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+#saisie {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--texte);
+  outline: none;
+}
+
+#saisie::selection { background: rgba(110, 168, 254, 0.32); }
+
+/* Jetons de coloration */
+.t-commentaire { color: var(--commentaire); font-style: italic; }
+.t-chaine { color: var(--chaine); }
+.t-fchaine { color: #7fd6a0; }
+.t-nombre { color: var(--nombre); }
+.t-mot { color: var(--mot); font-weight: 600; }
+.t-litteral { color: #d19a66; font-weight: 600; }
+.t-type { color: #4fc1c9; }
+.t-fonction { color: var(--accent); }
+.t-module { color: #e5c07b; }
+.t-exception { color: #e06c75; }
+.t-dunder { color: #c586c0; }
+.t-definition { color: #61afef; font-weight: 600; }
+.t-operateur { color: #8b93a5; }
+
+/* ------------------------------------------------------------------ statut */
+
+.statut {
+  display: flex;
+  gap: 16px;
+  padding: 5px 12px;
+  background: var(--fond-2);
+  border-top: 1px solid var(--bord);
+  color: var(--texte-2);
+  font-size: 12px;
+}
+
+.diagnostic { margin-left: auto; color: var(--erreur); }
+.diagnostic.ok { color: var(--chaine); }

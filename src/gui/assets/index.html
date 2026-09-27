@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uchi — éditeur</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="bar">
+  <span class="marque">Uchi</span>
+  <span class="racine" id="racine" title="Dossier de travail"></span>
+  <span class="file" id="titre">—</span>
+  <span class="etat" id="etat"></span>
+  <span class="actions">
+    <button id="nouveau" title="Créer un fichier (Ctrl+N)">Nouveau</button>
+    <button id="enregistrer" title="Enregistrer (Ctrl+S)">Enregistrer</button>
+    <button id="verifier" title="Analyser sans exécuter">Analyser</button>
+  </span>
+</header>
+
+<main class="corps">
+  <aside class="panneau">
+    <input id="filtre" type="search" placeholder="Filtrer…" autocomplete="off" spellcheck="false">
+    <ul id="arbre" class="arbre"></ul>
+  </aside>
+
+  <section class="editeur">
+    <div class="gouttiere" id="gouttiere" aria-hidden="true"></div>
+    <div class="zone">
+      <pre class="surcouche" id="surcouche" aria-hidden="true"></pre>
+      <textarea id="saisie" spellcheck="false" autocomplete="off" autocapitalize="off"
+        autocorrect="off" wrap="off" aria-label="Code Uchi"></textarea>
+    </div>
+  </section>
+</main>
+
+<footer class="statut">
+  <span id="position">Ln 1, Col 1</span>
+  <span id="taille">0 caractère</span>
+  <span id="diagnostic" class="diagnostic"></span>
+</footer>
+
+<script src="/highlight.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
