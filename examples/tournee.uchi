@@ -1,0 +1,172 @@
+# Exemple complet : triage, comprehension, dictionnaires, classes, exceptions,
+# expressions regulieres et JSON.
+
+import json
+import math
+import re
+import string
+
+# ------------------------------------------------------------------ fonctions
+
+def moyenne(values):
+    if len(values) == 0:
+        return 0
+    total = 0
+    for valeur in values:
+        total += valeur
+    return total / len(values)
+
+print('moyenne   :', moyenne([1, 2, 3, 4]))
+
+# Valeurs par defaut, arguments nommes, varargs et kwargs.
+def decrire(texte, *, prefixe='> ', largeur=0, **options):
+    ligne = prefixe + texte
+    if largeur > 0:
+        ligne = ligne.ljust(largeur, '.')
+    for cle in sorted(options.keys()):
+        ligne = ligne + f' [{cle}={options[cle]}]'
+    return ligne
+
+print(decrire('un', largeur=20, gras=True, italique=False))
+
+# Fermeture : un compteur partage.
+def creer_compteur():
+    total = 0
+
+    def incrementer(pas=1):
+        nonlocal total
+        total += pas
+        return total
+
+    return incrementer
+
+compteur = creer_compteur()
+compteur()
+compteur(5)
+print('compteur   :', compteur())
+
+# -------------------------------------------------------------- collections
+
+nombres = [5, 3, 9, 1, 7]
+print('tri        :', sorted(nombres))
+print('inverse    :', sorted(nombres, reverse=True))
+print('min / max  :', min(nombres), max(nombres))
+
+grands = [n for n in nombres if n > 4]
+print('filtre     :', grands)
+print('tranche    :', nombres[1:4], nombres[::-1])
+
+table = {'un': 1, 'deux': 2}
+table['trois'] = 3
+print('cles       :', sorted(table.keys()))
+print('presence   :', 'deux' in table, 'neuf' in table)
+
+ensembles = {1, 2, 3}
+ensembles.add(4)
+print('ensemble   :', sorted(ensembles), 3 in ensembles)
+
+doubles = [n * 2 for n in range(6) if n % 2 == 0]
+print('doubles    :', doubles)
+print('ensembles  :', {n % 3 for n in range(10)})
+print('carres     :', {n: n * n for n in range(4)})
+print('generateur :', sum(n for n in range(10) if n % 2 == 0), max(1, 7, 3))
+
+a, *reste = [1, 2, 3, 4]
+print('depaquetage:', a, reste)
+
+# -------------------------------------------------------------------- classes
+
+class Point:
+    def __init__(self, x=0, y=0):
+        self.x = x
+        self.y = y
+
+    def __str__(self):
+        return f'Point({self.x}, {self.y})'
+
+    def __repr__(self):
+        return f'Point(x={self.x}, y={self.y})'
+
+    def __add__(self, autre):
+        return Point(self.x + autre.x, self.y + autre.y)
+
+    def __eq__(self, autre):
+        return isinstance(autre, Point) and self.x == autre.x and self.y == autre.y
+
+    def distance(self):
+        return math.sqrt(self.x ** 2 + self.y ** 2)
+
+class Point3D(Point):
+    def __init__(self, x=0, y=0, z=0):
+        super().__init__(x, y)
+        self.z = z
+
+    def __str__(self):
+        return f'Point3D({self.x}, {self.y}, {self.z})'
+
+p = Point(3, 4)
+print('point      :', p, 'distance', p.distance())
+print('addition   :', p + Point(1, 1))
+print('3D         :', Point3D(1, 2, 3))
+print('heritage   :', isinstance(Point3D(1, 2, 3), Point))
+
+# -------------------------------------------------------------- exceptions
+
+class ErreurCustom(Exception):
+    pass
+
+def risquer(echec):
+    if echec:
+        raise ErreurCustom('operation refusee')
+    return 'ok'
+
+for tentative in [False, True]:
+    try:
+        print('risque     :', risquer(tentative))
+    except ErreurCustom as erreur:
+        print('capture    :', erreur)
+    else:
+        print('sans erreur')
+    finally:
+        print('           finally execute')
+
+try:
+    [1, 2, 3][10]
+except IndexError as erreur:
+    print('index      :', erreur)
+
+try:
+    int('pas un nombre')
+except ValueError as erreur:
+    print('conversion :', erreur)
+
+# ------------------------------------------------------------- formatage
+
+temperature = 36.6789
+print('format     :', f'{temperature:.2f}', f'{temperature:8.3f}', f'{temperature:,.2f}')
+print('alignement :', f'{"gauche":<10}|', f'{"droite":>10}|', f'{"centre":^10}|')
+print('chaine     :', string.ascii_lowercase[:5], 'ABC'.lower(), 'a,b,c'.split(','))
+print('math       :', math.sqrt(16), math.floor(3.7), math.factorial(5))
+
+# --------------------------------------------------------- expressions régulières
+
+journal = '2024-05-01 ERREUR disk 2024-05-02 INFO ok 2024-05-03 ERREUR reseau'
+
+print('recherche  :', re.search(r'\d{4}-\d{2}-\d{2}', journal).group())
+print('tous       :', re.findall(r'\d{4}-\d{2}-\d{2}', journal))
+print('groupes    :', re.findall(r'(\d{4})-(\d{2})-(\d{2})', journal)[0])
+print('nomme      :', re.search(r'(?P<jour>\d{4})-(?P<mois>\d{2})', journal).groupdict())
+print('substituer :', re.sub(r'\s+', ' ', '  trop    d\'espaces  '))
+print('masque     :', re.sub(r'\d', '#', 'a1b2c3'), re.split(r'\s+', 'un deux trois'))
+
+# ----------------------------------------------------------------------- json
+
+config = {'nom': 'Uchi', 'version': 2, 'actif': True, 'options': [1, 2], 'vide': None}
+print('json       :', json.dumps(config))
+print('indente    :', json.dumps({'a': [1, 2]}, indent=2).replace('\n', ' '))
+print('relecture  :', json.loads('{"x": [1, 2.5, null]}')['x'])
+
+try:
+    json.loads('{oups}')
+except json.JSONDecodeError as erreur:
+    print('json erreur:', erreur)

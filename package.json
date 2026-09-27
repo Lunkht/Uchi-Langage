@@ -1,0 +1,24 @@
+{
+  "name": "uchi",
+  "version": "0.1.0",
+  "description": "Uchi - un langage de programmation avec capacite GUI integree",
+  "type": "module",
+  "bin": {
+    "uchi": "./bin/uchi.mjs"
+  },
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "uchi": "node ./bin/uchi.mjs"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0"
+  },
+  "license": "MIT",
+  "private": true
+}
