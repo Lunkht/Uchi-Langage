@@ -73,6 +73,11 @@ export class UchiRuntimeError extends Error {
  */
 export class UchiThrow {
   readonly value: unknown;
+  /**
+   * Trace d'appels, du plus ancien au plus recent, telle que produite par
+   * l'interpreteur (`ligne 12, dans f`). Le dernier element designe la ligne
+   * ou l'erreur a ete levee.
+   */
   readonly traceback: string[];
 
   constructor(value: unknown, traceback: string[] = []) {
@@ -81,8 +86,38 @@ export class UchiThrow {
   }
 }
 
+/**
+ * Fournisseur de trace, installe par l'interpreteur.
+ *
+ * La trace doit etre capturee au moment du `raise`, car les cadres d'appels
+ * sont depiles au fur et a mesure que l'erreur remonte. `throwValue` est une
+ * fonction libre, sans acces a l'interpreteur : ce crochet fait le lien.
+ */
+let traceProvider: (() => string[]) | null = null;
+
+export function setTraceProvider(provider: (() => string[]) | null): void {
+  traceProvider = provider;
+}
+
+/** Trace d'appels courante, ou une trace vide hors execution. */
+export function currentTrace(): string[] {
+  return traceProvider === null ? [] : traceProvider();
+}
+
+/**
+ * Ligne designee par une trace d'appels : celle de son dernier element, donc
+ * l'endroit ou l'erreur a ete levee. `0` si la trace est vide ou sans ligne.
+ */
+export function tracebackLine(trace: readonly string[]): number {
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const found = /^ligne (\d+)/.exec(trace[i] as string);
+    if (found !== null) return Number(found[1]);
+  }
+  return 0;
+}
+
 export function throwValue(value: unknown): never {
-  throw new UchiThrow(value);
+  throw new UchiThrow(value, currentTrace());
 }
 
 export function syntaxErrorAt(

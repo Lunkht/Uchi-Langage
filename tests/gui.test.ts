@@ -75,6 +75,10 @@ test('l\'editeur sert sa page et ses ressources', async () => {
       assert.equal(response.status, 200, `${asset} doit etre servi`);
       assert.match(response.headers.get('content-type') ?? '', /text|javascript/);
     }
+    // L'icone vient de la racine du projet, pas du dossier des ressources.
+    const icone = await fetch(client.server.url.replace(/\/$/, '') + '/icon.svg');
+    assert.equal(icone.status, 200, 'l\'icone du projet doit etre servie');
+    assert.equal(icone.headers.get('content-type'), 'image/svg+xml');
     // Une ressource inconnue est refusee, comme un chemin hors de `assets`.
     assert.equal((await fetch(client.server.url + 'absent.css')).status, 404);
     assert.equal((await fetch(client.server.url.replace(/\/$/, '') + '/../package.json')).status, 404);
@@ -179,6 +183,69 @@ test('l\'analyse porte sur le tampon, pas sur le fichier', async () => {
   }
 });
 
+test('l\'execution renvoie la sortie du tampon', async () => {
+  const dir = workspace();
+  const client = await editor(dir);
+  try {
+    const resultat = await client.send('POST', '/api/run', {
+      path: 'bonjour.uchi',
+      text: 'import math\nprint("coucou")\nprint(math.floor(2.7))\n',
+    });
+    assert.equal(resultat.body.ok, true);
+    assert.equal(resultat.body.stdout, 'coucou\n2\n');
+    assert.deepEqual(resultat.body.trace, []);
+    assert.equal(resultat.body.error, null);
+    assert.equal(typeof resultat.body.durationMs, 'number');
+
+    // Le fichier du disque n'a pas ete modifie par l'execution.
+    assert.equal((await client.get('/api/file?path=bonjour.uchi')).body.text, 'print("bonjour")\n');
+  } finally {
+    await client.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('une erreur d\'execution est tracee avec sa ligne', async () => {
+  const dir = workspace();
+  const client = await editor(dir);
+  try {
+    const resultat = await client.send('POST', '/api/run', {
+      path: 'bonjour.uchi',
+      text: 'def divise(a, b):\n    return a / b\n\n\nprint("avant")\ndivise(1, 0)\nprint("apres")\n',
+    });
+    assert.equal(resultat.body.ok, false);
+    // La sortie ecrite avant l'echec est conservee.
+    assert.equal(resultat.body.stdout, 'avant\n');
+    assert.equal(resultat.body.error.name, 'ZeroDivisionError');
+    assert.equal(resultat.body.error.line, 2);
+    // La trace va de l'appel externe a l'appel fautif.
+    assert.deepEqual(resultat.body.trace, ['ligne 6, dans <module>', 'ligne 2, dans divise']);
+  } finally {
+    await client.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('une erreur de syntaxe empeche l\'execution', async () => {
+  const dir = workspace();
+  const client = await editor(dir);
+  try {
+    const resultat = await client.send('POST', '/api/run', { path: 'bonjour.uchi', text: 'def f(:\n' });
+    assert.equal(resultat.body.ok, false);
+    assert.equal(resultat.body.error.name, 'SyntaxError');
+    assert.equal(resultat.body.error.line, 1);
+    assert.equal(resultat.body.stdout, '');
+    assert.deepEqual(resultat.body.trace, []);
+
+    // Un chemin hors du dossier de travail est refuse comme pour l'analyse.
+    const echappement = await client.send('POST', '/api/run', { path: '../secret.uchi', text: '' });
+    assert.equal(echappement.status, 400);
+  } finally {
+    await client.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('le colorateur reconnait les jetons du langage', () => {
   const { highlight } = loadHighlighter(collectGrammar());
   const code = [
@@ -232,4 +299,195 @@ test('le colorateur suit les chaines brutes, f-strings et commentaires', () => {
   assert.match(highlight('x = 1  # fin'), /class="t-commentaire"># fin/);
   // Une ligne vide garde une espace : la hauteur de la surcouche suit la saisie.
   assert.equal(highlight('a\n\nb').split('\n')[1], ' ');
+});
+
+// ============================================================ editeur (DOM)
+
+/**
+ * Element de page minimal.
+ *
+ * Seules les proprietes utilisees par `app.js` sont implementees, avec les
+ * quelques coercitions du DOM qui comptent : poser `innerHTML` vide les
+ * enfants, `classList` passe par `className`.
+ */
+class FakeElement {
+  readonly tagName: string;
+  readonly children: FakeElement[] = [];
+  readonly dataset: Record<string, string> = {};
+  readonly classList: { add(c: string): void; remove(c: string): void; toggle(c: string): void; contains(c: string): boolean };
+  value = '';
+  textContent = '';
+  className = '';
+  title = '';
+  hidden = false;
+  focused = false;
+  scrollTop = 0;
+  scrollLeft = 0;
+  scrollHeight = 0;
+  selectionStart = 0;
+  selectionEnd = 0;
+  private html = '';
+  private listeners: Record<string, ((event: unknown) => void)[]> = {};
+
+  constructor(tag: string) {
+    this.tagName = tag.toUpperCase();
+    const element = this;
+    this.classList = {
+      add: (c) => { element.className = (element.className + ' ' + c).trim(); },
+      remove: (c) => { element.className = element.className.split(' ').filter((x) => x !== c).join(' '); },
+      toggle: (c) => { if (element.classList.contains(c)) element.classList.remove(c); else element.classList.add(c); },
+      contains: (c) => element.className.split(' ').includes(c),
+    };
+  }
+
+  /** Poser `innerHTML` remplace le contenu : les enfants disparaissent. */
+  get innerHTML(): string { return this.html; }
+  set innerHTML(valeur: string) {
+    this.html = valeur;
+    if (valeur === '') this.children.length = 0;
+  }
+
+  addEventListener(type: string, fn: (event: unknown) => void): void {
+    (this.listeners[type] ??= []).push(fn);
+  }
+
+  appendChild(child: FakeElement): FakeElement { this.children.push(child); return child; }
+
+  setRangeText(texte: string, debut: number, fin: number): void {
+    this.value = this.value.slice(0, debut) + texte + this.value.slice(fin);
+    this.selectionStart = this.selectionEnd = debut + texte.length;
+  }
+
+  setSelectionRange(debut: number, fin: number): void {
+    this.selectionStart = debut;
+    this.selectionEnd = fin;
+  }
+
+  focus(): void { this.focused = true; }
+
+  /** Declenche les écouteurs `click` enregistres. */
+  click(): void { for (const fn of this.listeners.click ?? []) fn({ preventDefault: () => {} }); }
+
+  /** Renvoie la classe de chaque numero de ligne de la gouttiere. */
+  get lignesGouttiere(): string[] {
+    return [...this.innerHTML.matchAll(/<div class="([^"]*)">/g)].map((m) => m[1] as string);
+  }
+}
+
+/** Page factice construite a partir des identifiants de la vraie page. */
+function fakePage(): { elements: Map<string, FakeElement>; document: Record<string, unknown> } {
+  const html = readFileSync(join(ASSETS, 'index.html'), 'utf8');
+  const elements = new Map<string, FakeElement>();
+  for (const [, id] of html.matchAll(/id="([^"]+)"/g)) elements.set(id as string, new FakeElement('div'));
+  const store = new Map<string, string>();
+  const documentListeners: Record<string, ((event: unknown) => void)[]> = {};
+  const document = {
+    title: '',
+    getElementById: (id: string) => elements.get(id) ?? null,
+    createElement: (tag: string) => new FakeElement(tag),
+    addEventListener: (type: string, fn: (event: unknown) => void) => {
+      (documentListeners[type] ??= []).push(fn);
+    },
+    localStorage: {
+      getItem: (cle: string) => (store.has(cle) ? (store.get(cle) as string) : null),
+      setItem: (cle: string, valeur: string) => { store.set(cle, valeur); },
+      removeItem: (cle: string) => { store.delete(cle); },
+    },
+  };
+  return { elements, document };
+}
+
+const attendre = (ms = 30): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+test('l\'editeur s\'ouvre, colorise et affiche le resultat d\'une execution', async () => {
+  const { elements, document } = fakePage();
+  const global = globalThis as Record<string, unknown>;
+  const sauvegarde = { ...global };
+  const api = {
+    'GET /api/grammar': { root: 'C:/demo', grammar: collectGrammar() },
+    'GET /api/tree': {
+      root: 'C:/demo',
+      files: [{ name: 'essai.uchi', path: 'essai.uchi', directory: false, size: 24 }],
+    },
+    'GET /api/file': { path: 'essai.uchi', text: 'def f():\n    return 1 / 0\n' },
+    'POST /api/check': { ok: true, error: null },
+    'POST /api/run': {
+      ok: false,
+      stdout: 'debut\n',
+      trace: ['ligne 1, dans <module>', 'ligne 2, dans f'],
+      error: { name: 'ZeroDivisionError', message: 'division par zero', line: 2 },
+      durationMs: 3,
+    },
+  };
+  const appels: string[] = [];
+
+  try {
+    // Les scripts de la page s'executent dans la portee globale du navigateur.
+    global.window = { document, addEventListener: () => {}, confirm: () => true, prompt: () => 'x.uchi' };
+    global.document = document;
+    global.localStorage = document.localStorage;
+    // eslint-disable-next-line no-new-func -- scripts de page, comme le colorateur
+    new Function(readFileSync(join(ASSETS, 'highlight.js'), 'utf8'))();
+    global.UchiHighlight = (global.window as { UchiHighlight: unknown }).UchiHighlight;
+    global.fetch = (url: string, options: { method?: string; body?: string } = {}) => {
+      const cle = (options.method ?? 'GET') + ' ' + String(url).split('?')[0];
+      appels.push(cle);
+      const data = (api as Record<string, unknown>)[cle] ?? { error: 'route inconnue' };
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(data) });
+    };
+    // eslint-disable-next-line no-new-func -- script de page
+    new Function(readFileSync(join(ASSETS, 'app.js'), 'utf8'))();
+    await attendre();
+
+    // Demarrage : grammaire, arborescence, puis ouverture du premier fichier.
+    assert.deepEqual(appels, ['GET /api/grammar', 'GET /api/tree', 'GET /api/file']);
+    const saisie = elements.get('saisie') as FakeElement;
+    assert.equal(saisie.value, 'def f():\n    return 1 / 0\n');
+    assert.equal(elements.get('titre')?.textContent, 'essai.uchi');
+    // La surcouche est coloree, la gouttiere compte les lignes du fichier.
+    assert.match(elements.get('surcouche')?.innerHTML ?? '', /class="t-definition">f/);
+    assert.equal((elements.get('gouttiere') as FakeElement).lignesGouttiere.length, 3);
+
+    // Execution : la sortie s'affiche, la trace se lit, la ligne fautive est
+    // marquee dans la gouttiere.
+    (elements.get('executer') as FakeElement).click();
+    await attendre();
+    assert.ok(appels.includes('POST /api/run'));
+    assert.equal(elements.get('sortie')?.textContent, 'debut\n');
+    assert.equal(elements.get('erreur-titre')?.textContent, 'ZeroDivisionError : division par zero');
+    assert.equal(elements.get('resume')?.textContent, 'échec après 3 ms');
+    const cadres = (elements.get('cadres') as FakeElement).children;
+    assert.deepEqual(cadres.map((c) => c.textContent), ['ligne 1, dans <module>', 'ligne 2, dans f']);
+    // Le dernier cadre designe l'appel fautif.
+    assert.match(cadres[1]?.className ?? '', /fautif/);
+    assert.deepEqual((elements.get('gouttiere') as FakeElement).lignesGouttiere, ['', 'ligne-erreur', '']);
+    assert.equal(elements.get('executer')?.textContent, 'Exécuter');
+
+    // Cliquer un cadre place le curseur sur la ligne designee.
+    cadres[1]?.click();
+    assert.equal(saisie.value.slice(saisie.selectionStart, saisie.selectionEnd), '    return 1 / 0');
+
+    // Replier puis effacer remet la console a zero.
+    (elements.get('replier') as FakeElement).click();
+    assert.match(elements.get('console')?.className ?? '', /replie/);
+    (elements.get('effacer') as FakeElement).click();
+    assert.equal(elements.get('sortie')?.textContent, '');
+    assert.equal((elements.get('cadres') as FakeElement).children.length, 0);
+    assert.equal((elements.get('erreur') as FakeElement).hidden, true);
+    assert.deepEqual((elements.get('gouttiere') as FakeElement).lignesGouttiere, ['', '', '']);
+  } finally {
+    for (const cle of ['window', 'document', 'localStorage', 'UchiHighlight', 'fetch']) {
+      if (sauvegarde[cle] === undefined) delete global[cle];
+      else global[cle] = sauvegarde[cle];
+    }
+  }
+});
+
+test('chaque identifiant demande par app.js existe dans la page', () => {
+  const html = readFileSync(join(ASSETS, 'index.html'), 'utf8');
+  const script = readFileSync(join(ASSETS, 'app.js'), 'utf8');
+  const presents = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+  const demandes = [...script.matchAll(/getElementById\('([^']+)'\)/g)].map((m) => m[1] as string);
+  assert.ok(demandes.length > 10, 'app.js doit demander plusieurs elements');
+  for (const id of demandes) assert.ok(presents.has(id), `l'identifiant '${id}' manque dans index.html`);
 });

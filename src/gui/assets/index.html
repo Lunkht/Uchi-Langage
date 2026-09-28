@@ -17,6 +17,7 @@
     <button id="nouveau" title="Créer un fichier (Ctrl+N)">Nouveau</button>
     <button id="enregistrer" title="Enregistrer (Ctrl+S)">Enregistrer</button>
     <button id="verifier" title="Analyser sans exécuter">Analyser</button>
+    <button id="executer" class="principal" title="Exécuter le tampon (Ctrl+Entrée)">Exécuter</button>
   </span>
 </header>
 
@@ -26,14 +27,30 @@
     <ul id="arbre" class="arbre"></ul>
   </aside>
 
-  <section class="editeur">
-    <div class="gouttiere" id="gouttiere" aria-hidden="true"></div>
-    <div class="zone">
-      <pre class="surcouche" id="surcouche" aria-hidden="true"></pre>
-      <textarea id="saisie" spellcheck="false" autocomplete="off" autocapitalize="off"
-        autocorrect="off" wrap="off" aria-label="Code Uchi"></textarea>
-    </div>
-  </section>
+  <div class="colonne">
+    <section class="editeur">
+      <div class="gouttiere" id="gouttiere" aria-hidden="true"></div>
+      <div class="zone">
+        <pre class="surcouche" id="surcouche" aria-hidden="true"></pre>
+        <textarea id="saisie" spellcheck="false" autocomplete="off" autocapitalize="off"
+          autocorrect="off" wrap="off" aria-label="Code Uchi"></textarea>
+      </div>
+    </section>
+
+    <section class="console" id="console">
+      <div class="console-bar">
+        <button id="replier" class="discret" title="Replier la sortie">▾</button>
+        <span class="console-titre">Sortie</span>
+        <span id="resume" class="resume"></span>
+        <button id="effacer" class="discret" title="Effacer la sortie">Effacer</button>
+      </div>
+      <pre id="sortie" class="sortie"></pre>
+      <div id="erreur" class="erreur" hidden>
+        <p id="erreur-titre" class="erreur-titre"></p>
+        <div id="cadres" class="cadres"></div>
+      </div>
+    </section>
+  </div>
 </main>
 
 <footer class="statut">

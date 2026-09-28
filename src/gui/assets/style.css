@@ -79,6 +79,14 @@ button {
 
 button:hover { border-color: var(--accent-2); color: #fff; }
 button:active { transform: translateY(1px); }
+button:disabled { opacity: 0.6; cursor: progress; }
+
+/* L'action principale se distingue des boutons d'outils. */
+button.principal {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: #fff;
+}
 
 /* -------------------------------------------------------------------- corps */
 
@@ -135,6 +143,14 @@ button:active { transform: translateY(1px); }
 }
 
 /* ------------------------------------------------------------------ éditeur */
+
+.colonne {
+  display: grid;
+  /* La console prend sa hauteur, l'éditeur occupe le reste. */
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+}
 
 .editeur {
   display: grid;
@@ -216,6 +232,83 @@ button:active { transform: translateY(1px); }
 .t-dunder { color: #c586c0; }
 .t-definition { color: #61afef; font-weight: 600; }
 .t-operateur { color: #8b93a5; }
+
+/* ------------------------------------------------------------------ console */
+
+.console {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--fond-2);
+  border-top: 1px solid var(--bord);
+  min-height: 0;
+}
+
+.console-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--bord);
+  color: var(--texte-2);
+  font-size: 12px;
+}
+
+.console-titre {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.resume { margin-left: auto; }
+.resume.ok { color: var(--chaine); }
+.resume.ko { color: var(--erreur); }
+
+button.discret {
+  padding: 1px 6px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--texte-2);
+}
+button.discret:hover { background: var(--fond-3); }
+
+.sortie {
+  margin: 0;
+  padding: 8px 12px;
+  max-height: 30vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--texte);
+}
+.sortie.vide { color: var(--texte-2); }
+
+.console.replie .sortie,
+.console.replie .erreur { display: none; }
+.console.replie #replier { transform: rotate(-90deg); }
+
+.erreur {
+  padding: 6px 12px 10px;
+  border-top: 1px solid var(--bord);
+  background: rgba(242, 119, 122, 0.07);
+}
+
+.erreur-titre {
+  margin: 0 0 4px;
+  color: var(--erreur);
+  white-space: pre-wrap;
+}
+
+.cadres { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+
+/* Chaque cadre d'appel est cliquable : il place le curseur sur la ligne. */
+.cadre {
+  padding: 1px 6px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--texte-2);
+  font-size: 12px;
+}
+.cadre:hover { background: var(--fond-3); color: #fff; }
+.cadre.fautif { color: var(--erreur); }
 
 /* ------------------------------------------------------------------ statut */
 

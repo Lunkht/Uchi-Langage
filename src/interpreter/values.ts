@@ -14,6 +14,7 @@
  */
 
 import type { Expr, Param, Stmt } from '../parser/ast.ts';
+import { currentTrace } from '../errors.ts';
 import type { Environment } from './environment.ts';
 import type { NativeCallArgs, NativeFunctionBody, HostContext } from './context.ts';
 
@@ -367,11 +368,23 @@ export class UchiError {
   readonly cause: UchiValue | null;
   /** `true` pour une erreur interne du runtime, jamais rattrapable par `except`. */
   readonly isInternal: boolean;
+  /**
+   * Trace d'appels au moment de la creation de l'erreur. Les operations
+   * natives creent l'erreur la ou elles echouent, ce qui en fait la ligne
+   * fautive ; un `raise` ajoute la sienne.
+   */
+  readonly traceback: string[];
 
   constructor(
     name: string,
     message: string,
-    options: { args?: UchiValue[]; klass?: UchiClass | null; cause?: UchiValue | null; isInternal?: boolean } = {},
+    options: {
+      args?: UchiValue[];
+      klass?: UchiClass | null;
+      cause?: UchiValue | null;
+      isInternal?: boolean;
+      traceback?: string[];
+    } = {},
   ) {
     this.name = name;
     this.message = message;
@@ -379,6 +392,7 @@ export class UchiError {
     this.klass = options.klass ?? null;
     this.cause = options.cause ?? null;
     this.isInternal = options.isInternal ?? false;
+    this.traceback = options.traceback ?? currentTrace();
   }
 }
 

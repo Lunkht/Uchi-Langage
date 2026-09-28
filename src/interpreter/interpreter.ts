@@ -11,7 +11,7 @@
  */
 
 import { readSync } from 'node:fs';
-import { UchiThrow, throwValue } from '../errors.ts';
+import { UchiThrow, setTraceProvider, throwValue } from '../errors.ts';
 import { parse } from '../parser/parser.ts';
 import { AUGMENTED_TO_BINARY } from '../parser/parser.ts';
 import type {
@@ -115,6 +115,8 @@ interface Frame {
   classContext: UchiClass | null;
   /** Recepteur implicite, si la fonction est une methode liee. */
   self: UchiValue | null;
+  /** Derniere instruction executee dans ce cadre : sert a la trace d'appels. */
+  line: number;
 }
 
 export interface InterpreterOptions {
@@ -144,6 +146,11 @@ export class Interpreter implements HostContext {
   readonly moduleLoader: ModuleLoader;
   /** Nom du module en cours d'execution (valeur de `__name__`). */
   currentModuleName = '__main__';
+  /** Ligne de la derniere instruction commencee : cible des erreurs d'execution. */
+  currentLine = 0;
+
+  /** Ligne de la derniere instruction du niveau module : origine de la trace. */
+  private moduleLine = 0;
 
   private readonly writeFn: (text: string) => void;
   private readonly readLineFn: () => string | null;
@@ -168,6 +175,8 @@ export class Interpreter implements HostContext {
       compare: (op, left, right) => this.overrideCompare(op, left, right),
       equals: (left, right) => this.overrideEquals(left, right),
     });
+    // `raise` n'a pas acces a l'interpreteur : la trace est capturee pour lui.
+    setTraceProvider(() => this.callTrace());
 
     for (const [name, value] of createBuiltins(this)) this.builtinsEnv.define(name, value);
     for (const [name, klass] of builtinTypeClasses()) this.builtinsEnv.define(name, klass);
@@ -211,9 +220,26 @@ export class Interpreter implements HostContext {
     try {
       return action();
     } catch (error) {
-      if (error instanceof UchiError) throw new UchiThrow(error);
+      // Les cadres sont deja depiles ici : la trace vient de l'erreur, capturee
+      // a sa creation, donc a l'endroit ou l'operation a echoue.
+      if (error instanceof UchiError) throw new UchiThrow(error, error.traceback);
       throw error;
     }
+  }
+
+  /**
+   * Trace d'appels, du plus ancien au plus recent : le niveau module, puis un
+   * cadre par fonction, avec la derniere ligne qui y fut executee. Le dernier
+   * element designe donc la ligne a afficher pour une erreur.
+   */
+  private callTrace(): string[] {
+    const lines: string[] = [];
+    if (this.moduleLine > 0) lines.push(`ligne ${this.moduleLine}, dans <module>`);
+    for (const frame of this.frames) {
+      lines.push(frame.line > 0 ? `ligne ${frame.line}, dans ${frame.name}` : `dans ${frame.name}`);
+    }
+    if (lines.length === 0) lines.push('module');
+    return lines;
   }
 
   /** Ecriture directe sur la sortie du programme. */
@@ -241,7 +267,10 @@ export class Interpreter implements HostContext {
   private execStatementsForResult(statements: Stmt[], env: Environment): UchiValue {
     let last: UchiValue = null;
     for (const statement of statements) {
+      // Les expressions sont evaluees ici sans passer par `exec` : la ligne est
+      // notee de la main, sinon une erreur du REPL n'aurait pas de trace.
       if (statement.kind === 'expr-statement') {
+        this.noteLine(statement);
         last = this.evaluate(statement.expression, env);
         continue;
       }
@@ -252,7 +281,28 @@ export class Interpreter implements HostContext {
     return last;
   }
 
+  /**
+   * Retient la ligne de l'instruction qui demarre.
+   *
+   * Une seule ecriture par instruction : c'est ce numero qui est affiche
+   * lorsqu'une erreur d'execution interrompt le programme, et celui que la
+   * trace d'appels attribue au cadre courant.
+   */
+  private noteLine(statement: Stmt): void {
+    const line = statement.loc?.line;
+    if (line === undefined || line <= 0) return;
+    this.currentLine = line;
+    const frame = this.frames[this.frames.length - 1];
+    if (frame === undefined) {
+      // Niveau module : la ligne sert de point de depart a la trace d'appels.
+      this.moduleLine = line;
+      return;
+    }
+    frame.line = line;
+  }
+
   private exec(statement: Stmt, env: Environment): Signal | null {
+    this.noteLine(statement);
     switch (statement.kind) {
       case 'expr-statement':
         this.evaluate(statement.expression, env);
@@ -1191,7 +1241,7 @@ export class Interpreter implements HostContext {
       return this.evaluate(fn.lambdaBody, callEnv);
     }
 
-    this.frames.push({ name: fn.name, classContext: context.classContext, self: context.self });
+    this.frames.push({ name: fn.name, classContext: context.classContext, self: context.self, line: 0 });
     try {
       const signal = this.execBlock(fn.body, callEnv);
       return signal instanceof ReturnSignal ? signal.value : null;

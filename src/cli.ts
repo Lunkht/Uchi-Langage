@@ -13,8 +13,8 @@ import { dirname, resolve } from 'node:path';
 import { UchiThrow, UchiSyntaxError } from './errors.ts';
 import { defaultRoot, openBrowser, openEditor } from './gui/index.ts';
 import { Interpreter } from './interpreter/interpreter.ts';
-import { toRepr, toStr } from './interpreter/operations.ts';
-import { UchiError, UchiInstance, type UchiValue } from './interpreter/values.ts';
+import { describeError } from './interpreter/report.ts';
+import { UchiError } from './interpreter/values.ts';
 import { parse } from './parser/parser.ts';
 import { UCHI_VERSION } from './stdlib/version.ts';
 
@@ -262,19 +262,4 @@ function reportError(interpreter: Interpreter | null, thrown: unknown, path: str
   }
   process.stderr.write(`${describeError(interpreter, thrown)}\n`);
   return 1;
-}
-
-function describeError(interpreter: Interpreter | null, thrown: unknown): string {
-  if (thrown instanceof UchiThrow) {
-    const value = thrown.value;
-    // `ValueError('oups')` : le nom du type suivi du message, comme en Python.
-    if (value instanceof UchiError) return `Erreur : ${value.name} : ${value.message}`;
-    if (value instanceof UchiInstance) {
-      const text = interpreter === null ? toStr(value) : interpreter.toDisplayString(value);
-      return `Erreur : ${value.klass.name} : ${text}`;
-    }
-    return `Erreur : ${toRepr(value as UchiValue)}`;
-  }
-  if (thrown instanceof Error) return `Erreur interne : ${thrown.message}`;
-  return `Erreur : ${String(thrown)}`;
 }

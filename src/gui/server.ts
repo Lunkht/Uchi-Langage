@@ -4,13 +4,19 @@
  * Il expose une page unique (editeur multi-fichiers avec coloration
  * syntaxique) et une petite API JSON limitee au dossier de travail. Aucune
  * dependance : uniquement `node:http` et `node:fs`.
+ *
+ * `POST /api/run` execute le code de l'editeur avec les privileges du
+ * processus, comme `uchi run`. Le serveur ecoute donc sur la boucle locale :
+ * c'est un outil de developpement, pas un service a exposer.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { UchiSyntaxError } from '../errors.ts';
+import { UchiSyntaxError, UchiThrow, tracebackLine } from '../errors.ts';
+import { Interpreter } from '../interpreter/interpreter.ts';
+import { errorSummary } from '../interpreter/report.ts';
 import { parse } from '../parser/parser.ts';
 import { collectGrammar, type Grammar } from './grammar.ts';
 
@@ -19,7 +25,7 @@ const PROJECT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 /** Ressources servies depuis la racine du projet, comme l'icone. */
 const PROJECT_ASSETS: Record<string, string> = {
-  '/icon.svg': 'uchi_icon-11.svg',
+  '/icon.svg': 'logo_uchi.svg',
 };
 
 /** Types MIME des ressources servies. */
@@ -232,6 +238,19 @@ async function handleApi(
       sendJson(response, 200, check(path, text));
       return;
     }
+    case 'POST /api/run': {
+      // Le tampon de l'editeur est execute tel quel : `Ctrl+S` n'est pas
+      // necessaire pour voir le resultat.
+      const body = await readBody(request);
+      const path = typeof body.path === 'string' ? resolveWithin(root, body.path) : null;
+      if (path === null) {
+        sendJson(response, 400, { error: 'chemin hors du dossier de travail' });
+        return;
+      }
+      const text = typeof body.text === 'string' ? body.text : undefined;
+      sendJson(response, 200, runBuffer(path, text));
+      return;
+    }
     default:
       sendJson(response, 404, { error: 'route inconnue' });
   }
@@ -266,6 +285,74 @@ function check(path: string, text: string | undefined): CheckResult {
     }
     return { ok: false, error: { message: message(error), line: 1, column: 0 } };
   }
+}
+
+/** Resultat d'une execution : sortie, trace d'appels et premiere erreur. */
+interface RunResult {
+  ok: boolean;
+  /** Sortie du programme, telle que `print` l'a ecrite. */
+  stdout: string;
+  /** Trace d'appels, de la fonction la plus externe a l'appel fautif. */
+  trace: string[];
+  error: { name: string; message: string; line: number } | null;
+  durationMs: number;
+}
+
+/**
+ * Execute un tampon de l'editeur.
+ *
+ * `input()` renvoie `null` : le programme n'a pas de terminal, donc il lit une
+ * fin de flux immediate plutot que de bloquer le serveur. Une erreur d'analyse
+ * est remontee telle quelle, avec sa ligne, pour que la gouttiere la marque.
+ */
+function runBuffer(path: string, text: string | undefined): RunResult {
+  const source = text ?? (existsSync(path) ? readFileSync(path, 'utf8') : null);
+  if (source === null) {
+    return emptyRun({ name: 'OSError', message: 'fichier introuvable', line: 0 });
+  }
+
+  let program;
+  try {
+    program = parse(source, path);
+  } catch (error) {
+    if (error instanceof UchiSyntaxError) {
+      return emptyRun({ name: 'SyntaxError', message: error.message, line: error.line });
+    }
+    return emptyRun({ name: 'Error', message: message(error), line: 0 });
+  }
+
+  let stdout = '';
+  const interpreter = new Interpreter({
+    argv: [path],
+    baseDirectory: dirname(path),
+    write: (chunk) => {
+      stdout += chunk;
+    },
+    readLine: () => null,
+  });
+
+  const started = performance.now();
+  try {
+    interpreter.run(program);
+    return { ok: true, stdout, trace: [], error: null, durationMs: Math.round(performance.now() - started) };
+  } catch (thrown) {
+    const { name, message: texte } = errorSummary(interpreter, thrown);
+    const trace = thrown instanceof UchiThrow ? thrown.traceback : [];
+    const line = tracebackLine(trace) || interpreter.currentLine;
+    return {
+      ok: false,
+      stdout,
+      trace,
+      // Une valeur levee qui n'est pas une exception n'a pas de type : elle est
+      // alors designee par le seul message.
+      error: { name: name === '' ? 'Erreur' : name, message: texte, line },
+      durationMs: Math.round(performance.now() - started),
+    };
+  }
+}
+
+function emptyRun(error: { name: string; message: string; line: number }): RunResult {
+  return { ok: false, stdout: '', trace: [], error, durationMs: 0 };
 }
 
 /** Chemin demande dans la requete, verifie comme etant dans le dossier racine. */

@@ -515,3 +515,75 @@ test('`__call__` recoit l\'instance comme premier argument', () => {
   assert.equal(run(source), '60 24 10\n');
   assert.match(failure('m = 3\nprint(m(1))\n'), /'int' n'est pas appelable/);
 });
+
+// ------------------------------------------------------------------ traces
+
+/** Renvoie la trace d'appels de la premiere exception levee. */
+function trace(source: string): string[] {
+  try {
+    run(source);
+  } catch (error) {
+    assert.ok(error instanceof UchiThrow, 'une UchiThrow est attendue');
+    return error.traceback;
+  }
+  assert.fail('aucune exception levee');
+}
+
+test('la trace d\'appels remonte les appels imbriques', () => {
+  const imbrique = [
+    'def interne(a):',
+    '    return a / 0',
+    '',
+    'def externe():',
+    '    return interne(3)',
+    '',
+    'externe()',
+    '',
+  ].join('\n');
+  // Du point de depart a l'appel fautif : la ligne du module, puis chaque
+  // fonction, la plus recente en dernier.
+  assert.deepEqual(trace(imbrique), [
+    'ligne 7, dans <module>',
+    'ligne 5, dans externe',
+    'ligne 2, dans interne',
+  ]);
+
+  // Au niveau module, la trace designe la ligne de l'instruction fautive.
+  assert.deepEqual(trace('x = 1\nprint(1 / 0)\n'), ['ligne 2, dans <module>']);
+
+  // Une methode de classe porte le nom de la methode, pas celui de la classe.
+  const methode = [
+    'class Pile:',
+    '    def sommet(self):',
+    '        return self.inconnu',
+    '',
+    'Pile().sommet()',
+    '',
+  ].join('\n');
+  assert.deepEqual(trace(methode), ['ligne 5, dans <module>', 'ligne 3, dans sommet']);
+});
+
+test('la trace designe la ligne du `raise`', () => {
+  const source = [
+    'def converter(texte):',
+    '    if not texte:',
+    '        raise ValueError("texte vide")',
+    '    return texte',
+    '',
+    'print(converter(""))',
+    '',
+  ].join('\n');
+  assert.deepEqual(trace(source), ['ligne 6, dans <module>', 'ligne 3, dans converter']);
+  // Une erreur rattrapee puis relancee garde la ligne du nouveau `raise`.
+  const relancee = [
+    'def f():',
+    '    try:',
+    '        return 1 / 0',
+    '    except ZeroDivisionError:',
+    '        raise ValueError("remplacee")',
+    '',
+    'f()',
+    '',
+  ].join('\n');
+  assert.deepEqual(trace(relancee), ['ligne 7, dans <module>', 'ligne 5, dans f']);
+});

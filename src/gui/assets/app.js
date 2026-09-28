@@ -20,6 +20,13 @@
   var taille = document.getElementById('taille');
   var diagnostic = document.getElementById('diagnostic');
   var racine = document.getElementById('racine');
+  var panneau = document.getElementById('console');
+  var sortie = document.getElementById('sortie');
+  var resume = document.getElementById('resume');
+  var blocErreur = document.getElementById('erreur');
+  var erreurTitre = document.getElementById('erreur-titre');
+  var cadres = document.getElementById('cadres');
+  var boutonExecuter = document.getElementById('executer');
 
   var chemin = null;      // chemin relatif du fichier ouvert
   var sale = false;       // modifications non enregistrees
@@ -180,6 +187,104 @@
       });
   }
 
+  /* -------------------------------------------------------------- execution */
+
+  /**
+   * Execute le tampon de l'editeur.
+   *
+   * Le serveur renvoie la sortie, la trace d'appels et la ligne fautive ; rien
+   * n'est ecrit sur le disque, donc on peut executer sans avoir enregistre.
+   */
+  function executer() {
+    if (chemin === null) return;
+    ouvrirConsole();
+    boutonExecuter.disabled = true;
+    boutonExecuter.textContent = 'Exécution…';
+    resume.className = 'resume';
+    resume.textContent = 'en cours…';
+    cadres.innerHTML = '';
+    blocErreur.hidden = true;
+    sortie.className = 'sortie';
+    sortie.textContent = '';
+
+    api('POST', '/api/run', { path: chemin, text: saisie.value })
+      .then(function (data) {
+        sortie.textContent = data.stdout === '' ? '(aucune sortie)' : data.stdout;
+        if (data.stdout === '') sortie.className = 'sortie vide';
+        sortie.scrollTop = sortie.scrollHeight;
+        if (data.ok) {
+          ligneFautive = 0;
+          resume.className = 'resume ok';
+          resume.textContent = 'terminé en ' + data.durationMs + ' ms';
+        } else {
+          ligneFautive = data.error.line;
+          resume.className = 'resume ko';
+          resume.textContent = 'échec après ' + data.durationMs + ' ms';
+          montrerErreur(data);
+        }
+        paintGutter();
+      })
+      .catch(function (erreur) {
+        resume.className = 'resume ko';
+        resume.textContent = 'échec';
+        erreurTitre.textContent = erreur.message;
+        blocErreur.hidden = false;
+      })
+      .then(function () {
+        boutonExecuter.disabled = false;
+        boutonExecuter.textContent = 'Exécuter';
+      });
+  }
+
+  /** Affiche le message d'erreur et la trace, cadre par cadre. */
+  function montrerErreur(data) {
+    erreurTitre.textContent = data.error.name + ' : ' + data.error.message;
+    data.trace.forEach(function (texte, index) {
+      var numero = /^ligne (\d+)/.exec(texte);
+      var cadre = document.createElement('button');
+      cadre.className = 'cadre' + (index === data.trace.length - 1 ? ' fautif' : '');
+      cadre.textContent = texte;
+      if (numero !== null) {
+        cadre.title = 'Aller à la ligne ' + numero[1];
+        cadre.addEventListener('click', function () { allerLigne(Number(numero[1])); });
+      }
+      cadres.appendChild(cadre);
+    });
+    blocErreur.hidden = false;
+  }
+
+  /** Place le curseur sur une ligne entiere et la met en evidence. */
+  function allerLigne(numero) {
+    var lignes = saisie.value.split('\n');
+    if (numero < 1 || numero > lignes.length) return;
+    var debut = 0;
+    for (var i = 0; i < numero - 1; i++) debut += lignes[i].length + 1;
+    saisie.focus();
+    saisie.setSelectionRange(debut, debut + lignes[numero - 1].length);
+    ligneFautive = numero;
+    paintGutter();
+    majPosition();
+  }
+
+  function ouvrirConsole() {
+    panneau.classList.remove('replie');
+  }
+
+  function replierConsole() {
+    panneau.classList.toggle('replie');
+  }
+
+  function effacerConsole() {
+    sortie.textContent = '';
+    sortie.className = 'sortie';
+    blocErreur.hidden = true;
+    cadres.innerHTML = '';
+    resume.className = 'resume';
+    resume.textContent = '';
+    ligneFautive = 0;
+    paintGutter();
+  }
+
   /* ---------------------------------------------------------------- fichiers */
 
   function ouvrir(cheminRelatif) {
@@ -206,6 +311,8 @@
       selectionnerArbre();
       ligneFautive = 0;
       diagnostic.textContent = '';
+      // La sortie precedente appartient au fichier precedent.
+      effacerConsole();
       rafraichir();
       planifierAnalyse();
     }).catch(function (erreur) {
@@ -313,7 +420,7 @@
 
   /* ------------------------------------------------------------------ evenements */
 
-  saisie.addEventListener('input', change);
+  saisie.addEventListener('input', changer);
   saisie.addEventListener('keydown', function (evenement) {
     var modifieur = evenement.ctrlKey || evenement.metaKey;
     if (modifieur && evenement.key.toLowerCase() === 's') {
@@ -334,6 +441,13 @@
     if (evenement.key === 'Enter') { surEntree(evenement); return; }
     if (evenement.key === 'Backspace') { surRetourArriere(evenement); return; }
   });
+  // Ctrl+Entree et F5 executent le tampon, comme dans un interpréteur.
+  document.addEventListener('keydown', function (evenement) {
+    var modifieur = evenement.ctrlKey || evenement.metaKey;
+    if (!(modifieur && evenement.key === 'Enter') && evenement.key !== 'F5') return;
+    executer();
+    evenement.preventDefault();
+  });
   saisie.addEventListener('scroll', function () {
     surcouche.scrollTop = saisie.scrollTop;
     surcouche.scrollLeft = saisie.scrollLeft;
@@ -352,6 +466,9 @@
   document.getElementById('enregistrer').addEventListener('click', enregistrer);
   document.getElementById('nouveau').addEventListener('click', nouveau);
   document.getElementById('verifier').addEventListener('click', analyser);
+  boutonExecuter.addEventListener('click', executer);
+  document.getElementById('replier').addEventListener('click', replierConsole);
+  document.getElementById('effacer').addEventListener('click', effacerConsole);
 
   /* ------------------------------------------------------------------ demarrage */
 
