@@ -14,11 +14,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { UchiSyntaxError, UchiThrow, tracebackLine } from '../errors.ts';
-import { Interpreter } from '../interpreter/interpreter.ts';
-import { errorSummary } from '../interpreter/report.ts';
+import { Worker } from 'node:worker_threads';
+import { UchiSyntaxError } from '../errors.ts';
 import { parse } from '../parser/parser.ts';
 import { collectGrammar, type Grammar } from './grammar.ts';
+import type { RunRequest, RunResult } from './protocol.ts';
 
 const ASSET_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'assets');
 const PROJECT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -46,6 +46,8 @@ export interface GuiOptions {
   port?: number;
   /** Interface d'ecoute, boucle locale par defaut. */
   host?: string;
+  /** Duree maximale d'une execution, en millisecondes. */
+  runTimeout?: number;
 }
 
 export interface GuiServer {
@@ -67,6 +69,16 @@ interface FileEntry {
 const MAX_BODY = 8 * 1024 * 1024;
 /** Profondeur maximale de l'arborescence, pour ne pas parcourir des arbres profonds. */
 const MAX_DEPTH = 8;
+/** Duree maximale d'une execution avant interruption du programme. */
+const DEFAULT_RUN_TIMEOUT = 10_000;
+
+/** Ce que le serveur sait de son dossier de travail pendant une requete. */
+interface Contexte {
+  root: string;
+  grammar: Grammar;
+  /** Duree maximale d'une execution, en millisecondes. */
+  runTimeout: number;
+}
 
 /** Demarre l'editeur web et renvoie son URL. */
 export function startGuiServer(options: GuiOptions): Promise<GuiServer> {
@@ -76,10 +88,14 @@ export function startGuiServer(options: GuiOptions): Promise<GuiServer> {
     return Promise.reject(new Error(`dossier de travail introuvable : '${root}'`));
   }
   mkdirSync(join(root, '.uchi-cache'), { recursive: true });
-  const grammar = collectGrammar();
+  const contexte: Contexte = {
+    root,
+    grammar: collectGrammar(),
+    runTimeout: options.runTimeout ?? DEFAULT_RUN_TIMEOUT,
+  };
 
   const server = createServer((request, response) => {
-    handle(request, response, root, grammar).catch((error: unknown) => {
+    handle(request, response, contexte).catch((error: unknown) => {
       sendJson(response, 500, { error: message(error) });
     });
   });
@@ -110,8 +126,7 @@ function closeServer(server: Server): Promise<void> {
 async function handle(
   request: IncomingMessage,
   response: ServerResponse,
-  root: string,
-  grammar: Grammar,
+  contexte: Contexte,
 ): Promise<void> {
   const method = request.method ?? 'GET';
   const url = new URL(request.url ?? '/', 'http://localhost');
@@ -120,7 +135,7 @@ async function handle(
   // Seules les methodes de lecture et d'ecriture des fichiers sont acceptees.
   if (route.startsWith('/api/')) {
     try {
-      await handleApi(request, response, root, grammar, route, method, url);
+      await handleApi(request, response, contexte, route, method, url);
     } catch (error) {
       // Un chemin hors du dossier de travail est une erreur de la requete.
       const bad = message(error).startsWith('chemin hors');
@@ -160,12 +175,12 @@ async function handle(
 async function handleApi(
   request: IncomingMessage,
   response: ServerResponse,
-  root: string,
-  grammar: Grammar,
+  contexte: Contexte,
   route: string,
   method: string,
   url: URL,
 ): Promise<void> {
+  const { root, grammar, runTimeout } = contexte;
   switch (`${method} ${route}`) {
     case 'GET /api/grammar':
       sendJson(response, 200, { root, grammar });
@@ -248,7 +263,7 @@ async function handleApi(
         return;
       }
       const text = typeof body.text === 'string' ? body.text : undefined;
-      sendJson(response, 200, runBuffer(path, text));
+      sendJson(response, 200, await runIsolated({ path, text }, runTimeout));
       return;
     }
     default:
@@ -287,72 +302,65 @@ function check(path: string, text: string | undefined): CheckResult {
   }
 }
 
-/** Resultat d'une execution : sortie, trace d'appels et premiere erreur. */
-interface RunResult {
-  ok: boolean;
-  /** Sortie du programme, telle que `print` l'a ecrite. */
-  stdout: string;
-  /** Trace d'appels, de la fonction la plus externe a l'appel fautif. */
-  trace: string[];
-  error: { name: string; message: string; line: number } | null;
-  durationMs: number;
-}
-
 /**
- * Execute un tampon de l'editeur.
+ * Execute un programme dans un fil dedie, et coupe au bout de `timeout`.
  *
- * `input()` renvoie `null` : le programme n'a pas de terminal, donc il lit une
- * fin de flux immediate plutot que de bloquer le serveur. Une erreur d'analyse
- * est remontee telle quelle, avec sa ligne, pour que la gouttiere la marque.
+ * Le fil se termine toujours : une boucle infinie immobilise le programme, pas
+ * l'editeur, et le serveur reste disponible pour enregistrer le fichier. La
+ * sortie deja ecrite par un programme interrompu est perdue : le fil ne la
+ * rend pas en arretant le programme.
  */
-function runBuffer(path: string, text: string | undefined): RunResult {
-  const source = text ?? (existsSync(path) ? readFileSync(path, 'utf8') : null);
-  if (source === null) {
-    return emptyRun({ name: 'OSError', message: 'fichier introuvable', line: 0 });
-  }
-
-  let program;
+async function runIsolated(request: RunRequest, timeout: number): Promise<RunResult> {
+  const worker = new Worker(new URL('./runner.ts', import.meta.url), { workerData: request });
   try {
-    program = parse(source, path);
-  } catch (error) {
-    if (error instanceof UchiSyntaxError) {
-      return emptyRun({ name: 'SyntaxError', message: error.message, line: error.line });
-    }
-    return emptyRun({ name: 'Error', message: message(error), line: 0 });
+    return await new Promise<RunResult>((resolvePromise) => {
+      let repondu = false;
+      const minuteur = setTimeout(() => {
+        repondre({
+          ok: false,
+          stdout: '',
+          trace: [],
+          error: {
+            name: 'TimeoutError',
+            message: `delai depasse (${Math.round(timeout / 1000)} s) : execution interrompue`,
+            line: 0,
+          },
+          durationMs: timeout,
+        });
+      }, timeout);
+
+      function repondre(result: RunResult): void {
+        if (repondu) return;
+        repondu = true;
+        clearTimeout(minuteur);
+        resolvePromise(result);
+      }
+
+      worker.on('message', repondre);
+      // Un plantage du programme (pile profunda, memoire) est rattrape ici.
+      worker.on('error', (erreur: Error) => {
+        repondre({
+          ok: false,
+          stdout: '',
+          trace: [],
+          error: { name: 'RuntimeError', message: erreur.message, line: 0 },
+          durationMs: 0,
+        });
+      });
+      // Un fil qui s'arrete sans avoir repondu a ete arrete par le systeme.
+      worker.on('exit', (code: number) => {
+        repondre({
+          ok: false,
+          stdout: '',
+          trace: [],
+          error: { name: 'RuntimeError', message: `le programme s'est arrete (code ${code})`, line: 0 },
+          durationMs: 0,
+        });
+      });
+    });
+  } finally {
+    await worker.terminate();
   }
-
-  let stdout = '';
-  const interpreter = new Interpreter({
-    argv: [path],
-    baseDirectory: dirname(path),
-    write: (chunk) => {
-      stdout += chunk;
-    },
-    readLine: () => null,
-  });
-
-  const started = performance.now();
-  try {
-    interpreter.run(program);
-    return { ok: true, stdout, trace: [], error: null, durationMs: Math.round(performance.now() - started) };
-  } catch (thrown) {
-    const { name, message: texte } = errorSummary(interpreter, thrown);
-    const trace = thrown instanceof UchiThrow ? thrown.traceback : [];
-    const line = tracebackLine(trace) || interpreter.currentLine;
-    return {
-      ok: false,
-      stdout,
-      trace,
-      // Une valeur levee qui n'est pas une exception n'a pas de type : elle est
-      // alors designee par le seul message.
-      error: { name: name === '' ? 'Erreur' : name, message: texte, line },
-      durationMs: Math.round(performance.now() - started),
-    };
-  }
-}
-
-function emptyRun(error: { name: string; message: string; line: number }): RunResult {
-  return { ok: false, stdout: '', trace: [], error, durationMs: 0 };
 }
 
 /** Chemin demande dans la requete, verifie comme etant dans le dossier racine. */

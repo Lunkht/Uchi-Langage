@@ -24,13 +24,16 @@ function workspace(): string {
 }
 
 /** Demarre un editeur sur un port libre et renvoie un client minimal. */
-async function editor(dir: string): Promise<{
+async function editor(
+  dir: string,
+  options: { runTimeout?: number } = {},
+): Promise<{
   server: GuiServer;
   get: (path: string) => Promise<{ status: number; body: any }>;
   send: (method: string, path: string, body?: unknown) => Promise<{ status: number; body: any }>;
   stop: () => Promise<void>;
 }> {
-  const server = await startGuiServer({ root: dir, port: 0 });
+  const server = await startGuiServer({ root: dir, port: 0, ...options });
   const call = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
     const response = await fetch(server.url.replace(/\/$/, '') + path, {
       method,
@@ -240,6 +243,42 @@ test('une erreur de syntaxe empeche l\'execution', async () => {
     // Un chemin hors du dossier de travail est refuse comme pour l'analyse.
     const echappement = await client.send('POST', '/api/run', { path: '../secret.uchi', text: '' });
     assert.equal(echappement.status, 400);
+  } finally {
+    await client.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('une boucle infinie est interrompue sans figer l\'editeur', async () => {
+  const dir = workspace();
+  const client = await editor(dir, { runTimeout: 300 });
+  try {
+    const resultat = await client.send('POST', '/api/run', { path: 'bonjour.uchi', text: 'while True:\n    pass\n' });
+    assert.equal(resultat.body.ok, false);
+    assert.equal(resultat.body.error.name, 'TimeoutError');
+    assert.match(resultat.body.error.message, /delai depasse/);
+
+    // Le serveur a survécu : le fichier est toujours lisible et enregistrable.
+    assert.equal((await client.get('/api/file?path=bonjour.uchi')).body.text, 'print("bonjour")\n');
+    const ecrit = await client.send('PUT', '/api/file?path=bonjour.uchi', { text: 'print("toujours la")\n' });
+    assert.equal(ecrit.status, 200);
+  } finally {
+    await client.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('la sortie d\'un programme bavard est bornee', async () => {
+  const dir = workspace();
+  const client = await editor(dir);
+  try {
+    // Deux megaoctets demandes, un megaoctet conserve.
+    const bavard = 'for i in range(2000):\n    print("a" * 1000)\n';
+    const resultat = await client.send('POST', '/api/run', { path: 'bonjour.uchi', text: bavard });
+    assert.equal(resultat.body.ok, true);
+    const sortie = resultat.body.stdout as string;
+    assert.ok(sortie.length < 2_000_000, `sortie de ${sortie.length} caracteres : elle doit etre bornee`);
+    assert.match(sortie, /\[sortie tronquee/);
   } finally {
     await client.stop();
     rmSync(dir, { recursive: true, force: true });

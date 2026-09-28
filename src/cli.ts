@@ -4,7 +4,7 @@
  *   uchi run <fichier.uchi> [args...]   execute un script
  *   uchi repl                            ouvre l'interpreteur interactif
  *   uchi check <fichier.uchi>            analyse sans executer
- *   uchi gui [dossier]                   ouvre l'editeur web
+ *   uchi gui [dossier] [options]         ouvre l'editeur web
  *   uchi version                         affiche la version
  */
 
@@ -24,7 +24,10 @@ Utilisation :
   uchi run <fichier.uchi> [arguments...]   execute un script
   uchi repl                                ouvre l'interpreteur interactif
   uchi check <fichier.uchi>                analyse le fichier sans l'executer
-  uchi gui [dossier] [--port N] [--no-open] ouvre l'editeur web
+  uchi gui [dossier] [options]        ouvre l'editeur web
+                                      --port N      port d'ecoute
+                                      --timeout S   duree max d'une execution (10 s)
+                                      --no-open     n'ouvre pas le navigateur
   uchi -e "<code>"                         execute un fragment de code
   uchi version                             affiche la version
   uchi help                                affiche cette aide
@@ -123,7 +126,7 @@ function checkCommand(args: string[]): number {
  * Le processus reste vivant jusqu'a l'arret du serveur par Ctrl+C.
  */
 async function guiCommand(args: string[]): Promise<number> {
-  const options = { root: defaultRoot(), port: 0, open: true };
+  const options = { root: defaultRoot(), port: 0, open: true, runTimeout: 10 };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] as string;
     if (arg === '--port') {
@@ -133,6 +136,13 @@ async function guiCommand(args: string[]): Promise<number> {
         return 2;
       }
       options.port = port;
+    } else if (arg === '--timeout') {
+      const secondes = Number(args[++i]);
+      if (!Number.isFinite(secondes) || secondes <= 0) {
+        process.stderr.write('Erreur : --timeout attend un nombre de secondes positif.\n');
+        return 2;
+      }
+      options.runTimeout = secondes;
     } else if (arg === '--no-open') {
       options.open = false;
     } else if (arg.startsWith('-')) {
@@ -148,10 +158,15 @@ async function guiCommand(args: string[]): Promise<number> {
   }
 
   try {
-    const server = await openEditor({ root: options.root, port: options.port });
+    const server = await openEditor({
+      root: options.root,
+      port: options.port,
+      runTimeout: options.runTimeout * 1000,
+    });
     process.stdout.write(`Uchi ${UCHI_VERSION} — editeur\n`);
     process.stdout.write(`  dossier : ${server.root}\n`);
     process.stdout.write(`  adresse : ${server.url}\n`);
+    process.stdout.write(`  execution : ${options.runTimeout} s maximum\n`);
     process.stdout.write('Ctrl+C pour arreter.\n');
     if (options.open) openBrowser(server.url);
     // Le serveur ecoute indefiniment : c'est la boucle d'evenements qui tient.
