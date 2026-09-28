@@ -3,15 +3,28 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { startGuiServer, type GuiServer } from '../src/gui/server.ts';
 import { collectGrammar } from '../src/gui/grammar.ts';
+import { EXTENSION, LANGUAGE_NAME } from '../src/language.ts';
 
-const ASSETS = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'gui', 'assets');
+const PROJECT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ASSETS = join(PROJECT, 'src', 'gui', 'assets');
+
+/** Fichiers d'un dossier et de ses sous-dossiers, dont le nom convient. */
+function grepFiles(dir: string, motif: RegExp): string[] {
+  const trouves: string[] = [];
+  for (const entree of readdirSync(dir, { withFileTypes: true })) {
+    const chemin = join(dir, entree.name);
+    if (entree.isDirectory()) trouves.push(...grepFiles(chemin, motif));
+    else if (motif.test(entree.name)) trouves.push(chemin);
+  }
+  return trouves;
+}
 
 /** Dossier de travail jetable, avec un petit projet Uchi. */
 function workspace(): string {
@@ -78,13 +91,50 @@ test('l\'editeur sert sa page et ses ressources', async () => {
       assert.equal(response.status, 200, `${asset} doit etre servi`);
       assert.match(response.headers.get('content-type') ?? '', /text|javascript/);
     }
+    // La page montre le logo du projet, pas un texte seul.
+    const page = await (await fetch(client.server.url.replace(/\/$/, '') + '/')).text();
+    assert.match(page, /<img class="logo" src="\/icon\.svg"/);
     // L'icone vient de la racine du projet, pas du dossier des ressources.
     const icone = await fetch(client.server.url.replace(/\/$/, '') + '/icon.svg');
     assert.equal(icone.status, 200, 'l\'icone du projet doit etre servie');
     assert.equal(icone.headers.get('content-type'), 'image/svg+xml');
+    assert.equal(await icone.text(), readFileSync(join(PROJECT, 'logo_uchi.svg'), 'utf8'));
+    const touche = await fetch(client.server.url.replace(/\/$/, '') + '/apple-touch-icon.png');
+    assert.equal(touche.status, 200, 'l\'icone tactile doit etre servie');
+    assert.equal(touche.headers.get('content-type'), 'image/png');
     // Une ressource inconnue est refusee, comme un chemin hors de `assets`.
     assert.equal((await fetch(client.server.url + 'absent.css')).status, 404);
     assert.equal((await fetch(client.server.url.replace(/\/$/, '') + '/../package.json')).status, 404);
+  } finally {
+    await client.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('le langage est declare une seule fois et expose par l\'API', async () => {
+  // Un seul litteral dans le code : tout le reste passe par la constante. Les
+  // commentaires, eux, peuvent nommer l'extension.
+  for (const file of grepFiles(join(PROJECT, 'src'), /\.ts$/)) {
+    const code = readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '');
+    const occurrences = code.match(/['"`]\.uchi['"`]/g) ?? [];
+    if (file.endsWith(join('language.ts'))) {
+      assert.equal(occurrences.length, 1, 'language.ts declare l\'extension');
+      continue;
+    }
+    assert.deepEqual(occurrences, [], `${file} doit utiliser EXTENSION`);
+  }
+
+  const dir = workspace();
+  const client = await editor(dir);
+  try {
+    const grammaire = await client.get('/api/grammar');
+    assert.deepEqual(grammaire.body.language, { name: LANGUAGE_NAME, extension: EXTENSION });
+    // Le serveur refuse un fichier qui ne porte pas l'extension du langage.
+    const refuse = await client.send('POST', '/api/file', { path: 'liste.txt' });
+    assert.equal(refuse.status, 400);
+    assert.match(refuse.body.error, /\.uchi/);
   } finally {
     await client.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -443,12 +493,17 @@ test('l\'editeur s\'ouvre, colorise et affiche le resultat d\'une execution', as
   const global = globalThis as Record<string, unknown>;
   const sauvegarde = { ...global };
   const api = {
-    'GET /api/grammar': { root: 'C:/demo', grammar: collectGrammar() },
+    'GET /api/grammar': {
+      root: 'C:/demo',
+      language: { name: LANGUAGE_NAME, extension: EXTENSION },
+      grammar: collectGrammar(),
+    },
     'GET /api/tree': {
       root: 'C:/demo',
       files: [{ name: 'essai.uchi', path: 'essai.uchi', directory: false, size: 24 }],
     },
     'GET /api/file': { path: 'essai.uchi', text: 'def f():\n    return 1 / 0\n' },
+    'POST /api/file': { path: 'x.uchi' },
     'POST /api/check': { ok: true, error: null },
     'POST /api/run': {
       ok: false,
@@ -459,10 +514,19 @@ test('l\'editeur s\'ouvre, colorise et affiche le resultat d\'une execution', as
     },
   };
   const appels: string[] = [];
+  const defauts: string[] = [];
 
   try {
     // Les scripts de la page s'executent dans la portee globale du navigateur.
-    global.window = { document, addEventListener: () => {}, confirm: () => true, prompt: () => 'x.uchi' };
+    global.window = {
+      document,
+      addEventListener: () => {},
+      confirm: () => true,
+      prompt: (_message: string, defaut: string) => {
+        defauts.push(defaut);
+        return 'x.uchi';
+      },
+    };
     global.document = document;
     global.localStorage = document.localStorage;
     // eslint-disable-next-line no-new-func -- scripts de page, comme le colorateur
@@ -480,6 +544,8 @@ test('l\'editeur s\'ouvre, colorise et affiche le resultat d\'une execution', as
 
     // Demarrage : grammaire, arborescence, puis ouverture du premier fichier.
     assert.deepEqual(appels, ['GET /api/grammar', 'GET /api/tree', 'GET /api/file']);
+    // Le nom affiche vient de l'API, comme le nom de fichier propose ensuite.
+    assert.equal(elements.get('langue')?.textContent, LANGUAGE_NAME);
     const saisie = elements.get('saisie') as FakeElement;
     assert.equal(saisie.value, 'def f():\n    return 1 / 0\n');
     assert.equal(elements.get('titre')?.textContent, 'essai.uchi');
@@ -514,6 +580,11 @@ test('l\'editeur s\'ouvre, colorise et affiche le resultat d\'une execution', as
     assert.equal((elements.get('cadres') as FakeElement).children.length, 0);
     assert.equal((elements.get('erreur') as FakeElement).hidden, true);
     assert.deepEqual((elements.get('gouttiere') as FakeElement).lignesGouttiere, ['', '', '']);
+
+    // Le nom propose pour un nouveau fichier porte l'extension du langage.
+    (elements.get('nouveau') as FakeElement).click();
+    await attendre();
+    assert.deepEqual(defauts, ['nouveau' + EXTENSION]);
   } finally {
     for (const cle of ['window', 'document', 'localStorage', 'UchiHighlight', 'fetch']) {
       if (sauvegarde[cle] === undefined) delete global[cle];

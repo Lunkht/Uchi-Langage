@@ -14,6 +14,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { throwValue } from '../errors.ts';
+import { EXTENSION, PACKAGE_FILE } from '../language.ts';
 import { parse } from '../parser/parser.ts';
 import type { Interpreter } from './interpreter.ts';
 import { Environment } from './environment.ts';
@@ -89,7 +90,10 @@ export class ModuleLoader {
     }
 
     for (const root of roots) {
-      for (const candidate of [join(root, `${relative}.uchi`), join(root, relative, '__init__.uchi')]) {
+      for (const candidate of [
+        join(root, `${relative}${EXTENSION}`),
+        join(root, relative, PACKAGE_FILE),
+      ]) {
         if (existsSync(candidate)) return candidate;
       }
     }

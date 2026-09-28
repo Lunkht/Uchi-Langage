@@ -14,6 +14,7 @@ import { UchiThrow, UchiSyntaxError } from './errors.ts';
 import { defaultRoot, openBrowser, openEditor } from './gui/index.ts';
 import { Interpreter } from './interpreter/interpreter.ts';
 import { describeError } from './interpreter/report.ts';
+import { EXTENSION } from './language.ts';
 import { UchiError } from './interpreter/values.ts';
 import { parse } from './parser/parser.ts';
 import { UCHI_VERSION } from './stdlib/version.ts';
@@ -21,9 +22,9 @@ import { UCHI_VERSION } from './stdlib/version.ts';
 const USAGE = `Uchi ${UCHI_VERSION}
 
 Utilisation :
-  uchi run <fichier.uchi> [arguments...]   execute un script
+  uchi run <fichier${EXTENSION}> [arguments...]   execute un script
   uchi repl                                ouvre l'interpreteur interactif
-  uchi check <fichier.uchi>                analyse le fichier sans l'executer
+  uchi check <fichier${EXTENSION}>                analyse le fichier sans l'executer
   uchi gui [dossier] [options]        ouvre l'editeur web
                                       --port N      port d'ecoute
                                       --timeout S   duree max d'une execution (10 s)
@@ -63,7 +64,7 @@ export function main(argv: string[]): number {
       return 0;
     default:
       // `uchi fichier.uchi` equivaut a `uchi run fichier.uchi`.
-      if (command.endsWith('.uchi')) return runCommand(argv);
+      if (command.endsWith(EXTENSION)) return runCommand(argv);
       process.stderr.write(`Commande inconnue : '${command}'\n\n${USAGE}`);
       return 2;
   }

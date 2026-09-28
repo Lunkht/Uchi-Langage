@@ -5,9 +5,9 @@
  * syntaxique) et une petite API JSON limitee au dossier de travail. Aucune
  * dependance : uniquement `node:http` et `node:fs`.
  *
- * `POST /api/run` execute le code de l'editeur avec les privileges du
- * processus, comme `uchi run`. Le serveur ecoute donc sur la boucle locale :
- * c'est un outil de developpement, pas un service a exposer.
+ * `POST /api/run` execute le code de l'editeur dans un fil dedie, avec les
+ * privileges du processus, comme `uchi run`. Le serveur ecoute donc sur la
+ * boucle locale : c'est un outil de developpement, pas un service a exposer.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -16,6 +16,7 @@ import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { UchiSyntaxError } from '../errors.ts';
+import { EXTENSION, LANGUAGE } from '../language.ts';
 import { parse } from '../parser/parser.ts';
 import { collectGrammar, type Grammar } from './grammar.ts';
 import type { RunRequest, RunResult } from './protocol.ts';
@@ -26,6 +27,7 @@ const PROJECT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 /** Ressources servies depuis la racine du projet, comme l'icone. */
 const PROJECT_ASSETS: Record<string, string> = {
   '/icon.svg': 'logo_uchi.svg',
+  '/apple-touch-icon.png': 'logo_uchi.png',
 };
 
 /** Types MIME des ressources servies. */
@@ -183,7 +185,9 @@ async function handleApi(
   const { root, grammar, runTimeout } = contexte;
   switch (`${method} ${route}`) {
     case 'GET /api/grammar':
-      sendJson(response, 200, { root, grammar });
+      // `language` permet a la page de nommer les nouveaux fichiers sans
+      // recopier l'extension du langage.
+      sendJson(response, 200, { root, language: LANGUAGE, grammar });
       return;
     case 'GET /api/tree':
       sendJson(response, 200, { root, files: listTree(root) });
@@ -212,8 +216,8 @@ async function handleApi(
     case 'POST /api/file': {
       const body = await readBody(request);
       const path = resolveWithin(root, typeof body.path === 'string' ? body.path : '');
-      if (path === null || !path.endsWith('.uchi')) {
-        sendJson(response, 400, { error: 'un nom de fichier .uchi est attendu' });
+      if (path === null || !path.endsWith(EXTENSION)) {
+        sendJson(response, 400, { error: `un nom de fichier ${EXTENSION} est attendu` });
         return;
       }
       if (existsSync(path)) {
@@ -409,7 +413,7 @@ function listTree(root: string): FileEntry[] {
         walk(full, depth + 1);
         continue;
       }
-      if (extname(name) === '.uchi') {
+      if (extname(name) === EXTENSION) {
         entries.push({
           path: relative(root, full).split(sep).join('/'),
           name,

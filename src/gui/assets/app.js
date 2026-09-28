@@ -27,12 +27,17 @@
   var erreurTitre = document.getElementById('erreur-titre');
   var cadres = document.getElementById('cadres');
   var boutonExecuter = document.getElementById('executer');
+  var langue = document.getElementById('langue');
 
   var chemin = null;      // chemin relatif du fichier ouvert
   var sale = false;       // modifications non enregistrees
   var arbreCourant = [];
   var minuteur = null;
   var minuteurBrouillon = null;
+  // Nom et extension du langage, fournis par le serveur : la page ne les
+  // invente pas, un seul endroit les declare.
+  var nomLangage = '';
+  var extension = '';
 
   /* ------------------------------------------------------------------ reseau */
 
@@ -339,7 +344,7 @@
   }
 
   function nouveau() {
-    var nom = window.prompt('Nom du nouveau fichier', 'nouveau.uchi');
+    var nom = window.prompt('Nom du nouveau fichier', 'nouveau' + extension);
     if (!nom) return;
     api('POST', '/api/file', { path: nom }).then(function (data) {
       return chargerArbre().then(function () { ouvrir(data.path); });
@@ -473,6 +478,9 @@
   /* ------------------------------------------------------------------ demarrage */
 
   api('GET', '/api/grammar').then(function (data) {
+    nomLangage = data.language.name;
+    extension = data.language.extension;
+    langue.textContent = nomLangage;
     UchiHighlight.configure(data.grammar);
     return chargerArbre();
   }).then(function (data) {
@@ -480,7 +488,7 @@
     var retenu = localStorage.getItem('uchi.fichier');
     var choix = fichiers.find(function (entree) { return entree.path === retenu; }) || fichiers[0];
     if (choix === undefined) {
-      saisie.value = '# Nouveau script Uchi\n\n';
+      saisie.value = '# Nouveau script ' + nomLangage + '\n\n';
       changer();
       return;
     }

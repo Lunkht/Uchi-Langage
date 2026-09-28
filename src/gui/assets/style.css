@@ -45,6 +45,23 @@ body {
 }
 
 .marque {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/*
+ * Le logo est un aplat vert petrole sur fond sombre : un peu de luminosite le
+ * detache de la barre sans changer ses couleurs.
+ */
+.logo {
+  display: block;
+  width: 20px;
+  height: 20px;
+  filter: brightness(1.35);
+}
+
+.nom {
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--accent);
