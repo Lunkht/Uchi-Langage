@@ -1,7 +1,7 @@
-/**
+﻿/**
  * Interpreteur Uchi : parcours de l'AST et execution.
  *
- * Modele : « tree-walking interpreter ». Chaque noeud de l'AST est visite au
+ * Modele : Â« tree-walking interpreter Â». Chaque noeud de l'AST est visite au
  * moment de l'execution. Les flux de controle (`break`, `continue`, `return`)
  * sont propages par des signaux, jamais par des exceptions, afin de distinguer
  * une sortie de boucle d'une erreur.
@@ -11,7 +11,8 @@
  */
 
 import { readSync } from 'node:fs';
-import { UchiThrow, setTraceProvider, throwValue } from '../errors.ts';
+import { resolve } from 'node:path';
+import { UchiThrow, currentTrace, setTraceProvider, throwValue } from '../errors.ts';
 import { parse } from '../parser/parser.ts';
 import { AUGMENTED_TO_BINARY } from '../parser/parser.ts';
 import type {
@@ -39,6 +40,7 @@ import {
   type MethodTable,
 } from './native-methods.ts';
 import { ModuleLoader } from './module-loader.ts';
+import { asResourceError } from './resource-errors.ts';
 import {
   binaryOp,
   compare,
@@ -146,6 +148,13 @@ export interface InterpreterOptions {
    * interrompre le programme sans perdre l'etat de la session.
    */
   deadlineMs?: number;
+  /**
+   * Dossier auquel `open()` est confine ; `null` (defaut) laisse le programme
+   * lire et ecrire n'importe ou, comme `uchi run`. L'editeur le fixe a son
+   * dossier de travail, pour qu'une page web ne puisse pas atteindre le reste
+   * du disque.
+   */
+  fileRoot?: string | null;
 }
 
 export class Interpreter implements HostContext {
@@ -156,6 +165,8 @@ export class Interpreter implements HostContext {
   readonly frames: Frame[] = [];
   readonly argv: string[];
   readonly moduleLoader: ModuleLoader;
+  /** Dossier de confiance de `open()`, ou `null` si le programme est libre. */
+  readonly fileRoot: string | null;
   /** Nom du module en cours d'execution (valeur de `__name__`). */
   currentModuleName = '__main__';
   /** Ligne de la derniere instruction commencee : cible des erreurs d'execution. */
@@ -185,6 +196,7 @@ export class Interpreter implements HostContext {
     this.maxCallDepth = options.maxCallDepth ?? 2000;
     this.maxLoopIterations = options.maxLoopIterations ?? 10_000_000;
     this.defaultDeadlineMs = options.deadlineMs ?? 0;
+    this.fileRoot = options.fileRoot == null ? null : resolve(options.fileRoot);
     this.armDeadline();
 
     this.builtinsEnv = new Environment(null, false);
@@ -245,7 +257,9 @@ export class Interpreter implements HostContext {
    *
    * Les erreurs des operations natives sont levees ainsi pour rester
    * rattrapables par `try` ; cette barriere garantit qu'un hebergeur ne voit
-   * jamais fuir une erreur non enveloppee.
+   * jamais fuir une erreur non enveloppee. Les echecs d'allocation et de
+   * recursion, eux, arrivent de JavaScript : ils sont traduits en exceptions
+   * ordinaires, pour que `except` les rattrape comme les autres.
    */
   private withThrowBoundary<T>(action: () => T): T {
     try {
@@ -254,8 +268,21 @@ export class Interpreter implements HostContext {
       // Les cadres sont deja depiles ici : la trace vient de l'erreur, capturee
       // a sa creation, donc a l'endroit ou l'operation a echoue.
       if (error instanceof UchiError) throw new UchiThrow(error, error.traceback);
+      const ressource = asResourceError(error, this.boundaryTrace());
+      if (ressource !== null) throw new UchiThrow(ressource, ressource.traceback);
       throw error;
     }
+  }
+
+  /**
+   * Trace a la limite publique, les cadres d'appels etant deja depiles.
+   *
+   * `callTrace` ne verrait plus que le niveau module : la derniere instruction
+   * demarree designe donc la ligne fautive, ce qui suffit a localiser un
+   * epuisement de pile ou d'allocation.
+   */
+  private boundaryTrace(): string[] {
+    return this.currentLine > 0 ? [`ligne ${this.currentLine}`] : this.callTrace();
   }
 
   /**
@@ -549,7 +576,7 @@ export class Interpreter implements HostContext {
   // ------------------------------------------------------------- exceptions
 
   /**
-   * `with expr as cible :` — appelle `__enter__`, lie le resultat, execute le
+   * `with expr as cible :` â€” appelle `__enter__`, lie le resultat, execute le
    * bloc, puis appelle toujours `__exit__`.
    *
    * `__exit__` recoit `(type, valeur, traceback)` comme en Python ; une valeur
@@ -587,7 +614,7 @@ export class Interpreter implements HostContext {
       }
       signal = this.execBlock(statement.body, env);
     } catch (error) {
-      thrown = asThrow(error);
+      thrown = asThrow(error, currentTrace());
     }
 
     // La sortie se fait en ordre inverse, comme les context managers imbriques.
@@ -627,7 +654,7 @@ export class Interpreter implements HostContext {
       try {
         signal = this.execBlock(statement.body, env);
       } catch (thrown) {
-        signal = this.dispatchHandlers(statement, env, asThrow(thrown));
+        signal = this.dispatchHandlers(statement, env, asThrow(thrown, currentTrace()));
         captured = true;
       }
 
@@ -671,7 +698,7 @@ export class Interpreter implements HostContext {
   }
 
   /**
-   * Vue « exception » d'une valeur levee. Une instance de classe utilisateur
+   * Vue Â« exception Â» d'une valeur levee. Une instance de classe utilisateur
    * est decrite par sa classe, ce qui permet `except MaErreur`.
    */
   asException(value: unknown): UchiError {
@@ -2064,12 +2091,23 @@ export class Interpreter implements HostContext {
  * Les codes natifs, et quelques operations de bas niveau, signalent une erreur
  * en levant directement un `UchiError` plutot qu'un `UchiThrow`. Ces deux
  * formes doivent pouvoir etre rattrapees par `except`, sinon la propagation
- * differerait selon l'origine de l'erreur. Les autres erreurs sont relancees
- * telles quelles : elles signalent un defaut du runtime.
+ * differerait selon l'origine de l'erreur.
+ *
+ * Les echecs d'allocation et de recursion, eux, viennent de JavaScript. Comme
+ * ils sont previsibles, ils deviennent des exceptions Uchi ordinaires : le
+ * programme peut ainsi les rattraper au lieu de decouvrir un Â« defaut
+ * d'Uchi Â». Les autres erreurs sont relancees telles quelles : elles signalent
+ * un defaut du runtime.
+ *
+ * @param error Exception a normaliser.
+ * @param traceback Trace d'appels, capturee ici car les cadres sont encore
+ *   en place : c'est l'endroit ou le defaut s'est produit.
  */
-function asThrow(error: unknown): UchiThrow {
+function asThrow(error: unknown, traceback: string[]): UchiThrow {
   if (error instanceof UchiThrow) return error;
   if (error instanceof UchiError) return new UchiThrow(error);
+  const ressource = asResourceError(error, traceback);
+  if (ressource !== null) return new UchiThrow(ressource, traceback);
   throw error;
 }
 

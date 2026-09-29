@@ -11,6 +11,7 @@ import { Interpreter } from '../src/interpreter/interpreter.ts';
 import { UchiSyntaxError, UchiThrow } from '../src/errors.ts';
 import { UchiError, UchiInstance, type UchiValue } from '../src/interpreter/values.ts';
 import { typeName } from '../src/interpreter/operations.ts';
+import { asResourceError } from '../src/interpreter/resource-errors.ts';
 
 /** Execute une source et renvoie tout ce qui a ete ecrit. */
 function run(source: string): string {
@@ -586,4 +587,72 @@ test('la trace designe la ligne du `raise`', () => {
     '',
   ].join('\n');
   assert.deepEqual(trace(relancee), ['ligne 7, dans <module>', 'ligne 5, dans f']);
+});
+
+test('les epuisements de ressources deviennent des exceptions rattrapables', () => {
+  // Un defaut du moteur n'est pas un defaut d'Uchi : le programme doit
+  // pouvoir le rattraper, puis continuer.
+  assert.equal(
+    run('try:\n    x = "a" * 10000000000\nexcept ValueError:\n    print("trop long")\nprint("la suite")\n'),
+    'trop long\nla suite\n',
+  );
+  assert.equal(
+    failure('x = "a" * 10000000000\n'),
+    'ValueError: taille de chaine invalide',
+  );
+  // La ligne fautive est celle qui a echoue, pas la derniere du programme.
+  assert.deepEqual(trace('x = 1\nx = "a" * 10000000000\nx = 3\n'), ['ligne 2']);
+});
+
+test('la reconnaissance des echecs JavaScript couvre les types d\'epuisement', () => {
+  // Ces allocations ne sont pas exercees : V8 tente vraiment d'allouer avant
+  // d'echouer, ce qui prendrait plusieurs secondes pour quelques gigaoctets.
+  // La traduction, elle, est une simple reconnaissance de message.
+  const chemin = ['ligne 7'];
+  const cas: Array<[unknown, string]> = [
+    [new RangeError('Invalid array length'), 'MemoryError'],
+    [new RangeError('Invalid typed array length'), 'MemoryError'],
+    [new RangeError('Array buffer allocation failed'), 'MemoryError'],
+    [new RangeError('Invalid string length'), 'ValueError'],
+    [new RangeError('Invalid count value'), 'ValueError'],
+    [new RangeError('Maximum call stack size exceeded'), 'RecursionError'],
+    // Un depilement peut remonter sous une classe qui n'est pas `RangeError`.
+    [new Error('Maximum call stack size exceeded'), 'RecursionError'],
+  ];
+  for (const [erreur, type] of cas) {
+    const traduite = asResourceError(erreur, chemin);
+    assert.equal(traduite?.name, type, `${String(erreur)} devrait devenir ${type}`);
+    assert.deepEqual(traduite?.traceback, chemin);
+  }
+  // Un vrai defaut du runtime n'est pas maquille en erreur du programme.
+  assert.equal(asResourceError(new TypeError("Cannot read properties of undefined"), chemin), null);
+  assert.equal(asResourceError('une chaine', chemin), null);
+  assert.equal(asResourceError(null, chemin), null);
+});
+
+test('la recursion qui epuise la pile est un RecursionError', () => {
+  const imbrique = [
+    'x = []',
+    'y = x',
+    'for _ in range(5000):',
+    '    y = [y]',
+    'print(y)',
+    '',
+  ].join('\n');
+  assert.equal(
+    run(imbrique.replace('print(y)', 'try:\n    print(y)\nexcept RecursionError:\n    print("trop profond")')),
+    'trop profond\n',
+  );
+  assert.equal(failure(imbrique), 'RecursionError: recursion trop profonde : la pile d\'appels est epuisee');
+  // La limite de profondeur d'Uchi porte le meme nom, pour que le filet
+  // `except RecursionError` couvre les deux origines.
+  assert.equal(
+    failure('def f():\n    return f()\n\nf()\n'),
+    'RecursionError: recursion trop profonde : la pile d\'appels est epuisee',
+  );
+});
+
+test('une erreur du runtime reste non rattrapable', () => {
+  // Le cas le plus courant n'a pas bouge : ni traduit ni rattrapable.
+  assert.equal(failure('print(inexistant)\n'), 'NameError: le nom \'inexistant\' n\'est pas defini');
 });

@@ -58,6 +58,11 @@ un '--' le separe des options d'Uchi :
 
   uchi run jeu${EXTENSION} --timeout 5     limite l'execution a 5 s
   uchi run jeu${EXTENSION} -- --timeout    le script recoit '--timeout'
+
+Le delai du repl s'applique aux boucles du langage : il interrompt un 'while'
+ou un 'for', pas une operation native comme une expression reguliere
+catastrophique. Contre celle-ci, seul Ctrl+C arrete le programme : le delai
+n'est pose que dans 'run', qui s'execute dans un fil interruptible.
 `;
 
 /** Options communes a `run` et `repl`. */
@@ -365,6 +370,13 @@ function replCommand(args: string[]): Promise<number> {
   }
 
   process.stdout.write(`Uchi ${UCHI_VERSION} — tapez 'exit()' pour quitter.\n`);
+  if (parsed.options.timeoutMs > 0) {
+    // La limite est annoncee avec sa portee : un delai qui laisse passer une
+    // expression reguliere catastrophique ferait croire a une garantie.
+    process.stdout.write(
+      `Delai de ${parsed.options.timeoutMs / 1000} s par instruction (boucles Uchi ; Ctrl+C reste necessaire contre une operation native). Ctrl+C pour interrompre.\n`,
+    );
+  }
 
   for (;;) {
     process.stdout.write(depth > 0 ? '... ' : '>>> ');

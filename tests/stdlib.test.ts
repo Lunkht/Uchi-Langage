@@ -3,7 +3,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -20,6 +20,8 @@ interface RunOptions {
   baseDirectory?: string;
   readLine?: () => string | null;
   argv?: string[];
+  /** Dossier auquel `open()` est confine ; absent, le programme est libre. */
+  fileRoot?: string;
 }
 
 function run(source: string, options: RunOptions = {}): string {
@@ -29,6 +31,7 @@ function run(source: string, options: RunOptions = {}): string {
     readLine: options.readLine,
     baseDirectory: options.baseDirectory,
     argv: options.argv,
+    fileRoot: options.fileRoot,
   });
   interpreter.runSource(source, 'test.uchi');
   return output;
@@ -88,6 +91,45 @@ test('les erreurs de fichier et de mode sont distinguees', () => {
   assertThrows(`open("${absent}")\n`, 'FileNotFoundError');
   // Le mode est valide avant l'ouverture : une faute de frappe donne ValueError.
   assertThrows(`open("${absent}", 'zz')\n`, 'ValueError');
+});
+
+test('un interpreteur confine refuse de sortir de son dossier', () => {
+  const dehors = workspace();
+  const dir = workspace();
+  writeFileSync(join(dehors, 'secret.txt'), 'donnees sensibles', 'utf8');
+  writeFileSync(join(dir, 'propre.txt'), 'lu', 'utf8');
+  const confine = { fileRoot: dir };
+
+  // Le contenu du dossier de travail reste accessible, en lecture comme en
+  // ecriture, par chemin absolu comme par chemin relatif.
+  assert.equal(
+    run(`f = open("propre.txt")\nprint(f.read())\nf.close()\n`, confine),
+    'lu\n',
+  );
+  const sortie = join(dir, 'cree.txt').replaceAll('\\', '/');
+  assert.equal(run(`g = open("${sortie}", 'w')\nprint(g.write('oui'))\ng.close()\n`, confine), '3\n');
+  assert.equal(
+    run(`f = open("cree.txt")\nprint(f.read())\nf.close()\n`, confine),
+    'oui\n',
+  );
+
+  const exterieur = join(dehors, 'secret.txt').replaceAll('\\', '/');
+  assertThrows(`open("${exterieur}")\n`, 'PermissionError', confine);
+  assertThrows(`open("../${exterieur}")\n`, 'PermissionError', confine);
+  assertThrows(`open("..\\\\..\\\\Windows\\\\win.ini")\n`, 'PermissionError', confine);
+  // Un lien symbolique dans le dossier ne doit pas ouvrir la porte de l'etre.
+  symlinkSync(dehors, join(dir, 'evasion'), 'junction');
+  assertThrows('open("evasion/secret.txt")\n', 'PermissionError', confine);
+  // Le dossier parent sort de la racine : c'est la frontiere a verifier.
+  const parent = join(dir, '..').replaceAll('\\', '/');
+  assertThrows(`open("${parent}")\n`, 'PermissionError', confine);
+
+  // Sans `fileRoot`, le programme n'est pas confine : c'est le cas de
+  // `uchi run`, ou l'utilisateur choisit lui-meme ses chemins.
+  assert.equal(run(`f = open("${exterieur}")\nprint(f.read())\nf.close()\n`), 'donnees sensibles\n');
+  // Le mode reste valide avant le confinement : la faute de frappe est la meme.
+  assertThrows(`open("propre.txt", 'zz')\n`, 'ValueError', confine);
+  assertThrows('open("absent.txt")\n', 'FileNotFoundError', confine);
 });
 
 test('les imports de modules et de paquets sont hierarchiques', () => {

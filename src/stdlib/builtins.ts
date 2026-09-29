@@ -213,6 +213,7 @@ const ERROR_HIERARCHY: Array<[string, string | null]> = [
   ['ImportError', 'Exception'],
   ['ModuleNotFoundError', 'ImportError'],
   ['RecursionError', 'RuntimeError'],
+  ['MemoryError', 'Exception'],
   ['InternalError', 'Exception'],
   // Exceptions systeme : leurs noms sont utilisables dans `except`, et
   // `errorMatches` retombe sur le nom quand aucune classe ne correspond.
@@ -527,7 +528,7 @@ export function createBuiltins(interpreter: Interpreter): Array<[string, UchiVal
 
   builtins.push(['super', native('super', () => interpreter.makeSuper())]);
   builtins.push(['__version__', UCHI_VERSION]);
-  builtins.push(...createFileBuiltins());
+  builtins.push(...createFileBuiltins(interpreter.fileRoot));
   for (const [name, klass] of errorClasses) builtins.push([name, klass]);
   return builtins;
 }

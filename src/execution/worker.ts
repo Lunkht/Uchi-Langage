@@ -64,6 +64,9 @@ function run(request: RunRequest): RunResult {
   const interpreter = new Interpreter({
     argv,
     baseDirectory: dirname(request.path),
+    // `undefined` pour `uchi run` : le programme garde l'acces complet au
+    // disque, comme le demande son propre auteur.
+    fileRoot: request.fileRoot,
     write: ecrire,
     // Le programme n'a pas de terminal : `input()` atteint immediatement la fin
     // du flux plutot que de bloquer l'appelant.

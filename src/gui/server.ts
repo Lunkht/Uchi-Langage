@@ -8,6 +8,11 @@
  * `POST /api/run` execute le code de l'editeur dans un fil dedie, avec les
  * privileges du processus, comme `uchi run`. Le serveur ecoute donc sur la
  * boucle locale : c'est un outil de developpement, pas un service a exposer.
+ *
+ * Cette confiance a un prix : toute page web pourrait demander l'execution de
+ * code sur cette machine. Le serveur s'en defends (voir `verifieOrigine`) :
+ * il ne repond qu'a une requete dont l'origine est la sienne, et le programme
+ * execute ne peut pas lire le disque hors du dossier de travail.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -80,6 +85,98 @@ interface Contexte {
   grammar: Grammar;
   /** Duree maximale d'une execution, en millisecondes. */
   runTimeout: number;
+  /**
+   * En-tetes `Host` acceptes. `null` lorsque l'interface a ete exposee
+   * explicitement : le developpeur a alors demande d'etre joignable, et la
+   * verification n'aurait plus de sens.
+   */
+  hotes: ReadonlySet<string> | null;
+}
+
+/** Reponse de refus a une requete dont l'origine n'est pas la sienne. */
+interface Refus {
+  status: number;
+  message: string;
+}
+
+/**
+ * Noms et adresses que la boucle locale porte.
+ *
+ * `localhost` et `127.0.0.1` designent la meme machine mais pas la meme
+ * chaine : un navigateur compare l'origine lettre a lettre, et cette
+ * verification doit donc accepter les deux formes.
+ */
+const BOUCLES_LOCALES: readonly string[] = ['127.0.0.1', 'localhost', '[::1]', '::1'];
+
+function estBoucleLocale(host: string): boolean {
+  return BOUCLES_LOCALES.includes(host) || host.startsWith('127.');
+}
+
+/** En-tetes `Host` acceptes pour l'interface d'ecoute donnee. */
+function hotesAutorises(host: string, port: number): Set<string> | null {
+  if (!estBoucleLocale(host)) return null;
+  return new Set(BOUCLES_LOCALES.map((nom) => `${nom}:${port}`));
+}
+
+/** Methodes qui changent l'etat du serveur : seuleselles subissent aux refuses d'origine. */
+const METHODES_ECRIVANTES: readonly string[] = ['POST', 'PUT', 'DELETE', 'PATCH'];
+
+/**
+ * Verifie qu'une requete vient bien de l'editeur.
+ *
+ * L'editeur execute du code avec les privileges du processus : une page tierce
+ * ne doit pas pouvoir y demander une execution. Les verifications se cumulent,
+ * chacune couvrant une parade des navigateurs.
+ *
+ * 1. `Host` doit designer la boucle locale, pour toute requete. Cela bloque le
+ *    *rebinding* DNS, ou un nom resolu vers `127.0.0.1` ferait passer la
+ *    requete pour legitime.
+ * 2. `Sec-Fetch-Site: cross-site` est un refus net : le navigateur ne permet
+ *    pas de le maquiller depuis une page.
+ * 3. `Origin`, quand le navigateur l'envoie, doit designer le meme hote que
+ *    `Host`. C'est la regle meme-origine, et elle vaut aussi pour les requetes
+ *    que le navigateur considere comme simples.
+ *
+ * Ces trois-la ne concernent que les ecritures : une lecture ne peut rien
+ * changer, et le navigateur n'en transmet pas la reponse a la page tierce
+ * sans en-tete autorise. Refuser une lecture inter-sites n'ajouterait rien et
+ * empecherait d'ouvrir l'editeur depuis un lien.
+ *
+ * Un `POST` doit en outre porter `application/json` : un tel type declenche une
+ * verification prealable (*preflight*) des que la page est distante, et le
+ * serveur n'en envoie aucune, donc la requete n'aboutit jamais. Un formulaire
+ * ou une image ne peuvent pas produire un `POST` en JSON.
+ */
+function verifieOrigine(request: IncomingMessage, contexte: Contexte, method: string): Refus | null {
+  const hote = request.headers.host ?? '';
+  if (contexte.hotes !== null && !contexte.hotes.has(hote)) {
+    return { status: 403, message: 'hote non autorise' };
+  }
+  if (!METHODES_ECRIVANTES.includes(method)) return null;
+  if (request.headers['sec-fetch-site'] === 'cross-site') {
+    return { status: 403, message: 'requete inter-sites refusee' };
+  }
+  const origine = request.headers.origin;
+  if (typeof origine === 'string' && origine !== 'null' && origine !== '') {
+    let depuis: URL;
+    try {
+      depuis = new URL(origine);
+    } catch {
+      return { status: 403, message: 'origine invalide' };
+    }
+    // L'origine doit designer le meme couple hote/port que la requete, et un
+    // simple http : une origine `null` — un fichier local — ne l'est pas.
+    if (depuis.host !== hote || (depuis.protocol !== 'http:' && depuis.protocol !== 'https:')) {
+      return { status: 403, message: 'origine non autorisee' };
+    }
+  }
+  if (method === 'POST' || method === 'PUT') {
+    const type = request.headers['content-type'] ?? '';
+    if (!/^application\/json\b/i.test(type)) {
+      return { status: 415, message: 'corps de requete JSON attendu (content-type: application/json)' };
+    }
+  }
+  return null;
 }
 
 /** Demarre l'editeur web et renvoie son URL. */
@@ -94,6 +191,8 @@ export function startGuiServer(options: GuiOptions): Promise<GuiServer> {
     root,
     grammar: collectGrammar(),
     runTimeout: options.runTimeout ?? DEFAULT_RUN_TIMEOUT,
+    // Renseigne a l'ecoute, quand le port est connu.
+    hotes: null,
   };
 
   const server = createServer((request, response) => {
@@ -107,6 +206,8 @@ export function startGuiServer(options: GuiOptions): Promise<GuiServer> {
     server.listen(options.port ?? 0, host, () => {
       const address = server.address();
       const port = typeof address === 'object' && address !== null ? address.port : 0;
+      // Le port etant connu, les en-tetes `Host` acceptes le deviennent aussi.
+      (contexte as { hotes: ReadonlySet<string> | null }).hotes = hotesAutorises(host, port);
       resolvePromise({
         url: `http://${host}:${port}/`,
         port,
@@ -133,6 +234,16 @@ async function handle(
   const method = request.method ?? 'GET';
   const url = new URL(request.url ?? '/', 'http://localhost');
   const route = url.pathname;
+
+  // Avant tout routage : une requete qui ne vient pas de l'editeur n'a rien a
+  // faire ici. L'en-tete `Host` est verifie pour toute requete, y compris de
+  // lecture : c'est lui qui distingue un vrai navigateur d'un nom resolu vers
+  // la boucle locale.
+  const refus = verifieOrigine(request, contexte, method);
+  if (refus !== null) {
+    sendJson(response, refus.status, { error: refus.message });
+    return;
+  }
 
   // Seules les methodes de lecture et d'ecriture des fichiers sont acceptees.
   if (route.startsWith('/api/')) {
@@ -267,7 +378,10 @@ async function handleApi(
         return;
       }
       const text = typeof body.text === 'string' ? body.text : undefined;
-      sendJson(response, 200, await runIsolated({ path, text }, runTimeout));
+      // Le programme herite du dossier de travail : il ne peut ni lire ni
+      // ecrire ailleurs, meme si la page demandait autre chose.
+      const execution: RunRequest = { path, text, fileRoot: root };
+      sendJson(response, 200, await runIsolated(execution, runTimeout));
       return;
     }
     default:
@@ -395,6 +509,10 @@ function send(response: ServerResponse, status: number, contentType: string, bod
     'content-length': Buffer.byteLength(body),
     // L'editeur n'a besoin d'aucune ressource externe.
     'cache-control': 'no-store',
+    // Le contenu est du code servi par le serveur lui-meme : un navigateur ne
+    // doit ni le renifler ni transmettre l'adresse a un tiers.
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
   });
   response.end(body);
 }

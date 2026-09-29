@@ -18,6 +18,13 @@ export interface RunRequest {
    * dans le resultat final.
    */
   stream?: boolean;
+  /**
+   * Dossier auquel `open()` est confine. Absent, le programme lit et ecrit
+   * n'importe ou : c'est le cas de `uchi run`, ou l'utilisateur choisit
+   * lui-meme ses chemins. L'editeur le renseigne pour que le programme execute
+   * depuis une page web n'atteigne que son dossier de travail.
+   */
+  fileRoot?: string;
 }
 
 export interface RunError {

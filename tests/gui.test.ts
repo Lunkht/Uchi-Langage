@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSyn
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { request as httpRequest } from 'node:http';
 
 import { startGuiServer, type GuiServer } from '../src/gui/server.ts';
 import { collectGrammar } from '../src/gui/grammar.ts';
@@ -600,4 +601,151 @@ test('chaque identifiant demande par app.js existe dans la page', () => {
   const demandes = [...script.matchAll(/getElementById\('([^']+)'\)/g)].map((m) => m[1] as string);
   assert.ok(demandes.length > 10, 'app.js doit demander plusieurs elements');
   for (const id of demandes) assert.ok(presents.has(id), `l'identifiant '${id}' manque dans index.html`);
+});
+
+/**
+ * Requete avec controle direct des en-tetes.
+ *
+ * `fetch` forbid le nom d'hote, or c'est justement ce qu'un navigateur
+ * verifie : la seule facon de reproduire une requete hostile est de passer par
+ * le module `http`.
+ */
+function brut(
+  server: GuiServer,
+  methode: string,
+  chemin: string,
+  entetes: Record<string, string> = {},
+  corps?: unknown,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const requete = httpRequest(
+      {
+        host: '127.0.0.1',
+        port: server.port,
+        path: chemin,
+        method: methode,
+        headers: { 'content-type': 'application/json', ...entetes },
+      },
+      (reponse) => {
+        let data = '';
+        reponse.setEncoding('utf8');
+        reponse.on('data', (fragment) => { data += fragment; });
+        reponse.on('end', () => resolve({ status: reponse.statusCode ?? 0, body: data }));
+      },
+    );
+    requete.on('error', reject);
+    requete.end(corps === undefined ? undefined : JSON.stringify(corps));
+  });
+}
+
+test('le serveur refuse les requetes qui ne viennent pas de l\'editeur', async () => {
+  const dir = workspace();
+  const { server, stop } = await editor(dir);
+  try {
+    const corps = { path: 'bonjour.uchi' };
+
+    // Un nom d'hote etranger signe d'un rebinding DNS : la page joignable
+    // sous un nom resolu vers la boucle locale ne doit rien obtenir.
+    const etranger = await brut(server, 'POST', '/api/run', { host: 'attaquant.example' }, corps);
+    assert.equal(etranger.status, 403);
+    assert.match(etranger.body, /hote non autorise/);
+    assert.equal((await brut(server, 'GET', '/api/tree', { host: 'attaquant.example' })).status, 403);
+
+    // Une origine tierce qui tente d'ecrire : c'est la requete forgee d'un
+    // formulaire, d'une image ou d'un script tiers.
+    const origine = await brut(
+      server,
+      'POST',
+      '/api/run',
+      { origin: 'http://attaquant.example' },
+      corps,
+    );
+    assert.equal(origine.status, 403);
+    assert.match(origine.body, /origine non autorisee/);
+
+    // Le navigateur annonce lui-meme le site source : ce refus ne peut pas etre
+    // contourne en forgeant une requete.
+    const intersites = await brut(
+      server,
+      'POST',
+      '/api/run',
+      { 'sec-fetch-site': 'cross-site' },
+      corps,
+    );
+    assert.equal(intersites.status, 403);
+    assert.match(intersites.body, /inter-sites refusee/);
+
+    // Un formulaire ne peut pas produire un POST en JSON : le type impose
+    // declenche une verification prealable que le serveur ne valide jamais.
+    const formulaire = await brut(
+      server,
+      'POST',
+      '/api/run',
+      { 'content-type': 'text/plain' },
+      corps,
+    );
+    assert.equal(formulaire.status, 415);
+    assert.match(formulaire.body, /content-type: application\/json/);
+  } finally {
+    await stop();
+  }
+});
+
+test('l\'editeur continue de fonctionner pour lui-meme', async () => {
+  const dir = workspace();
+  const { server, send, stop } = await editor(dir);
+  try {
+    const port = server.port;
+    // Meme origine, y compris par le nom `localhost` : le navigateur compare
+    // l'origine lettre a lettre, l'editeur doit donc accepter les deux formes.
+    for (const hote of [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]) {
+      const reponse = await brut(
+        server,
+        'POST',
+        '/api/run',
+        { host: hote, origin: `http://${hote}` },
+        { path: 'bonjour.uchi' },
+      );
+      assert.equal(reponse.status, 200, `hote '${hote}' refuse a tort`);
+      const resultat = JSON.parse(reponse.body);
+      assert.equal(resultat.ok, true);
+      assert.equal(resultat.stdout, 'bonjour\n');
+    }
+    // Ouvrir l'editeur par un lien reste possible : une lecture ne change
+    // rien, et le navigateur n'en transmet pas la reponse a la page source.
+    const page = await brut(server, 'GET', '/', { origin: 'http://attaquant.example' });
+    assert.equal(page.status, 200);
+    assert.match(page.body, /<!DOCTYPE html>/);
+    assert.equal((await send('GET', '/api/tree')).status, 200);
+  } finally {
+    await stop();
+  }
+});
+
+test('le programme execute par l\'editeur est confine a son dossier', async () => {
+  const dir = workspace();
+  const dehors = mkdtempSync(join(tmpdir(), 'uchi-dehors-'));
+  writeFileSync(join(dehors, 'secret.txt'), 'donnees sensibles', 'utf8');
+  const { server, send, stop } = await editor(dir);
+  try {
+    const executer = async (source: string): Promise<any> => {
+      const reponse = await send('POST', '/api/run', { path: 'bonjour.uchi', text: source });
+      assert.equal(reponse.status, 200);
+      return reponse.body;
+    };
+
+    // Un fichier du dossier de travail reste lisible.
+    const interne = await executer('print(open("notes.txt").read().strip())\n');
+    assert.equal(interne.ok, true);
+    assert.equal(interne.stdout, 'ignore\n');
+
+    for (const chemin of [join(dehors, 'secret.txt').replaceAll('\\', '/'), '../../../Windows/win.ini']) {
+      const echec = await executer(
+        `try:\n    f = open("${chemin}")\nexcept PermissionError:\n    print("refuse")\n`,
+      );
+      assert.equal(echec.stdout, 'refuse\n', `le chemin '${chemin}' aurait du etre refuse`);
+    }
+  } finally {
+    await stop();
+  }
 });

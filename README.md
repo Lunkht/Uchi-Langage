@@ -54,14 +54,52 @@ node ./bin/uchi.mjs repl --timeout 2            # 2 s par instruction saisie
 - `run` exécute le script dans un *worker* dédié. Le délai atteint, le programme est arrêté
   avec un `TimeoutError` ; le terminal, lui, ne peut pas se retrouver bloqué.
 - `repl` ne peut pas employer de *worker* — la session perdrait son état entre les lignes.
-  Chaque instruction est donc bornée depuis l'intérieur des boucles, et la session survit à
-  une instruction interrompue. Une expression qui ne rend pas la main, comme une
-  expression régulière maladroite, n'est en revanche pas interrompue.
+  Chaque instruction est donc bornée depuis l'intérieur des boucles `while` et `for`, et la
+  session survit à une instruction interrompue. Une opération qui ne rend pas la main au
+  langage n'est en revanche pas interrompue : `re.match('(a+)+$', 'a' * 30 + 'b')` peut rester
+  bloqué indéfiniment malgré `--timeout 2`. Seuls `Ctrl+C` ou la fermeture du terminal en
+  viennent à bout — c'est pour cela que `run`, qui est dans un *worker*, est la forme à
+  privilégier pour un script douteux.
 - Au `repl`, une instruction qui ouvre un bloc (`def`, `if`, …) se saisit jusqu'à la ligne
   vide, qui clôture et exécute la saisie.
 - `--no-timeout` rend le terminal au script : `input()` fonctionne, mais plus rien n'est protégé.
 - Un `--` sépare les options d'Uchi des arguments du script :
   `node ./bin/uchi.mjs run jeu.uchi -- --timeout` transmet `--timeout` au script.
+
+## Erreurs d'épuisement
+
+Allouer trop, s'appeler trop profondément ou agrandir une chaîne à l'excès échoue au niveau de
+JavaScript. Ces échecs sont convertis en exceptions Uchi ordinaires, donc rattrapables :
+
+```uchi
+try:
+    list(range(10**9))       # MemoryError : allocation impossible
+except MemoryError:
+    print('trop grand')
+
+try:
+    print(x)                 # RecursionError sur une structure trop imbriquée
+except RecursionError:
+    print('trop profond')
+```
+
+`RecursionError` dérive de `RuntimeError`, `MemoryError` de `Exception` — comme en Python. Une
+vraie erreur du runtime (un `TypeError` de V8, par exemple) reste signalée comme telle et n'est
+pas rattrapable : elle signale un défaut d'Uchi, pas une erreur du programme.
+
+## Éditeur web
+
+L'éditeur exécute du code avec les privilèges du processus. Trois mesures encadrent ce risque :
+
+- `open()` est confiné au dossier de travail : un programme lancé depuis la page ne peut ni
+  lire ni écrire ailleurs, et un lien symbolique posé dans le dossier ne contourne pas cette
+  limite. `uchi run` n'est pas concerné — l'utilisateur choisit lui-même ses chemins.
+- Les requêtes dont l'en-tête `Host` ne désigne pas la boucle locale sont refusées, ce qui
+  bloque le *rebinding* DNS.
+- Les requêtes d'écriture venant d'une autre origine sont refusées (`Origin`,
+  `Sec-Fetch-Site`), et un `POST` doit déclarer `content-type: application/json`, ce qui
+  soumet toute page distante à une vérification *preflight* que le serveur ne valide jamais.
+  Ouvrir l'éditeur par un lien reste possible : les lectures ne sont pas concernées.
 
 ## Exemple
 
@@ -84,19 +122,23 @@ expressions régulières et JSON.
 ## Développement
 
 ```bash
-npm test           # 84 tests
+npm test           # 92 tests
 npm run typecheck  # tsc --noEmit, mode strict
 ```
 
-Couverture mesurée : **81,8 % des lignes**, 76,3 % des branches, 74,1 % des fonctions.
+Couverture mesurée : **82,9 % des lignes**, 76,6 % des branches, 74,4 % des fonctions.
 
 ## État du projet
 
 Version `0.1.0`, en développement actif. L'audit de code du 2026-09-29 a relevé des écarts
-connus de conformité à Python — notamment la précision des entiers au-delà de 2⁵³, la
-récursion qui échappe à la limite de profondeur, et l'absence de vérification d'origine sur
-l'API de l'éditeur. **Le serveur de l'éditeur ne doit pas être exposé à un réseau** : il est
-conçu pour un usage local sur la Loopback.
+connus de conformité à Python — notamment la précision des entiers au-delà de 2⁵³, et des
+arguments nommés acceptés puis ignorés par plusieurs fonctions de la bibliothèque standard
+(`print(..., file=)`, `re.sub(..., count=)`, `enumerate(..., start=)`, `open(..., mode=)`).
+La limite de profondeur d'appels ne couvre pas les rappels entre méthodes natives, mais leur
+épuisement de pile est désormais un `RecursionError` rattrapable au lieu d'une erreur interne.
+L'origine des requêtes de l'éditeur et l'accès aux fichiers du programme exécuté y sont encadrés
+(voir « Éditeur web »), sans en faire une frontière de sécurité : **le serveur de l'éditeur ne
+doit pas être exposé à un réseau** — il reste conçu pour un usage local sur la Loopback.
 
 ## Licence
 

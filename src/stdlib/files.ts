@@ -5,9 +5,14 @@
  * mode, tampon de lecture) vit dans `payload`, invisible depuis le code Uchi.
  * La lecture se fait par blocs, ce qui evite de charger un fichier entier en
  * memoire pour un simple `readline()`.
+ *
+ * Un interpreteur peut etre confine : lorsqu'il declare un dossier de travail,
+ * `open()` n'accede qu'a ce dossier. L'editeur s'en sert pour qu'un programme
+ * execute depuis une page web n'atteigne pas le reste du disque.
  */
 
-import { closeSync, openSync, readSync, writeSync } from 'node:fs';
+import { closeSync, openSync, readSync, realpathSync, writeSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { makeError } from '../interpreter/error-registry.ts';
 import { arityCheck, expectInt, expectString } from '../interpreter/context.ts';
 import type { NativeCallArgs } from '../interpreter/context.ts';
@@ -87,6 +92,57 @@ function stateOf(self: UchiValue, who: string): FileState {
   return state;
 }
 
+// =================================================================== confinement
+
+/** `true` si `path` est `root` lui-meme ou un de ses descendants. */
+function dans(root: string, path: string): boolean {
+  return path === root || path.startsWith(root + sep);
+}
+
+/** Dossier de confiance apres resolution des liens symboliques. */
+function racineReelle(root: string): string {
+  try {
+    return realpathSync(root);
+  } catch {
+    return resolve(root);
+  }
+}
+
+function refuser(root: string, requested: string): never {
+  throw makeError(
+    'PermissionError',
+    `acces refuse : '${requested}' est hors du dossier de travail '${root}'`,
+  );
+}
+
+/**
+ * Verifie qu'un chemin demande reste dans le dossier de confiance, et renvoie
+ * sa forme absolue.
+ *
+ * La comparaison porte sur le chemin resolu, puis sur sa forme reelle : un
+ * lien symbolique place dans le dossier peut designer un fichier exterieur
+ * sans que le chemin demande ne le revele. Le premier element qui existe
+ * suffit a trancher, un fichier a creer n'ayant pas encore de lien.
+ */
+function confine(root: string, requested: string): string {
+  const path = isAbsolute(requested) ? resolve(requested) : resolve(root, requested);
+  if (!dans(root, path)) refuser(root, requested);
+  let reel = path;
+  for (;;) {
+    try {
+      reel = realpathSync(reel);
+      break;
+    } catch {
+      const parent = dirname(reel);
+      // Racine du disque atteinte : plus rien n'existe a verifier.
+      if (parent === reel) break;
+      reel = parent;
+    }
+  }
+  if (!dans(root, reel)) refuser(root, requested);
+  return path;
+}
+
 /** Remplit le tampon de lecture si necessaire. */
 function fillBuffer(state: FileState): boolean {
   if (state.pending.length > 0) return true;
@@ -106,8 +162,9 @@ function readSome(state: FileState, buffer: Buffer, length: number, who: string)
   }
 }
 
-export function createFileBuiltins(): Array<[string, UchiValue]> {
+export function createFileBuiltins(fileRoot: string | null = null): Array<[string, UchiValue]> {
   const klass = new UchiClass('File', []);
+  const racine = fileRoot === null ? null : racineReelle(fileRoot);
 
   // Les methodes sont d'abord decrites comme des fonctions pures sur l'etat,
   // puis enregistrees sur la classe : `readlines` peut ainsi reutiliser
@@ -267,16 +324,20 @@ export function createFileBuiltins(): Array<[string, UchiValue]> {
 
   const open = new UchiNativeFunction('open', (args) => {
     arityCheck(args, 'open', 1, 3);
-    const path = expectString(args.positional[0] as UchiValue, 'open()');
+    const demandee = expectString(args.positional[0] as UchiValue, 'open()');
     const mode = args.positional[1] === undefined ? 'r' : expectString(args.positional[1], 'open()');
     // La conversion du mode est validee avant toute tentative d'ouverture : une
     // mauvaise ecriture doit lever `ValueError`, pas `FileNotFoundError`.
     const flags = toFlags(mode);
+    // Le confinement est verifie apres le mode, pour que le programme recoive
+    // la meme erreur de saisie qu'en ligne de commande, quel que soit le
+    // dossier de travail.
+    const path = racine === null ? demandee : confine(racine, demandee);
     let descriptor: number;
     try {
       descriptor = openSync(path, flags);
     } catch (thrown) {
-      throw fileError('open', path, thrown);
+      throw fileError('open', demandee, thrown);
     }
     const instance = new UchiInstance(klass);
     instance.payload = { descriptor, mode, path, closed: false, pending: '' } satisfies FileState;

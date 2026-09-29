@@ -27,11 +27,17 @@ export function errorClassNames(): string[] {
 export function makeError(
   name: string,
   message: string,
-  options: { args?: UchiValue[]; cause?: UchiValue | null; klass?: UchiClass | null } = {},
+  options: {
+    args?: UchiValue[];
+    cause?: UchiValue | null;
+    klass?: UchiClass | null;
+    traceback?: string[];
+  } = {},
 ): UchiError {
   return new UchiError(name, message, {
     args: options.args ?? [message],
     klass: options.klass ?? registry.get(name) ?? null,
     cause: options.cause ?? null,
+    traceback: options.traceback,
   });
 }
