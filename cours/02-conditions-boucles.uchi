@@ -1,0 +1,172 @@
+# Lecon 2 : conditions et boucles
+#
+# Objectif : faireChoisir un programme et repeter un traitement.
+# Executer avec : npm run uchi -- run cours/02-conditions-boucles.uchi
+
+# ------------------------------------------------------------- if
+
+# `if` teste une condition. Une valeur nulle ou vide est fausse, les autres
+# sont vraies : on n'ecrit pas `if x != 0` quand `if x` suffit.
+temperature = 22
+if temperature > 30:
+    print('il fait chaud')
+elif temperature > 15:
+    print('il fait agreable')
+else:
+    print('il fait froid')
+
+# Les conditions se combinent avec `and`, `or`, `not` et se parenthesent.
+age = 20
+if age >= 18 and age <= 64:
+    print('actif')
+if 'admin' in ['admin', 'root'] or age < 0:
+    print('acces particulier')
+
+# `elif` n'est evalue que si le `if` precedent est faux. Les deux separees
+# par `if` s'evalueraient toutes les deux.
+lettre = 'k'
+if lettre in 'aeiou':
+    print('voyelle')
+else:
+    print('consonne')
+
+# Comparer avec `==` (valeurs egales) et non avec `=` (affectation).
+# Les chaines se comparent contenu, les listes aussi.
+print('abc' == 'abc', [1, 2] == [1, 2], 1 == 1.0, 1 != 2)
+
+# ------------------------------------------------------------- while
+
+# `while` repete tant que la condition est vraie. Il faut donc s'assurer que
+# la condition finira par devenir fausse.
+compteur = 0
+while compteur < 3:
+    print('tour', compteur)
+    compteur += 1
+
+# `break` sort de la boucle, `continue` passe a l'iteration suivante.
+n = 0
+while n < 10:
+    n += 1
+    if n % 2 == 1:
+        continue
+    if n > 6:
+        break
+    print('pair', n)
+
+# ------------------------------------------------------------- for
+
+# `for` parcourt ce qui est iterable : liste, chaine, tuple, dictionnaire,
+# ensemble, et meme fichier (vu dans la lecon 6).
+for lettre in 'abc':
+    print(lettre, end=' ')
+print()
+
+for ville in ['Paris', 'Lyon', 'Nice']:
+    print(ville.upper())
+
+# `range` produit des entiers. `range(a, b)` va de a a b exclu, `range(a, b,
+# p)` avance de p.
+for n in range(5):
+    print(n, end=' ')
+print()
+for n in range(2, 10, 3):
+    print(n, end=' ')
+print()
+
+# Le bloc `else` d'une boucle s'execute quand la boucle se termine sans
+# `break`. C'est commode pour distinguer " fini " de " abandonne ".
+for n in range(5):
+    if n == 7:
+        break
+else:
+    print('aucun 7 trouve')
+
+for n in range(5):
+    if n == 3:
+        break
+else:
+    print('jamais affiche : le break a saute le else')
+
+# `enumerate` donne l'indice et la valeur, `zip` deux listes en parallele.
+fruits = ['pomme', 'kiwi', 'mangue']
+for i, fruit in enumerate(fruits, 1):
+    print(i, fruit)
+
+for lettre, fruit in zip('abc', fruits):
+    print(lettre, '->', fruit)
+
+# `reversed` parcourt une sequence a l'envers.
+for fruit in reversed(fruits):
+    print(fruit, end=' ')
+print()
+
+# ------------------------------------------------------------- comprehension
+
+# Une comprehension construit une liste en une ligne : c'est plus court et
+# plus rapide qu'une boucle qui ajoute dans une liste.
+carres = [n * n for n in range(6)]
+print(carres)
+
+paires = [(a, b) for a in [1, 2] for b in 'xy']
+print(paires)
+
+# `if` sert de filtre, comme dans un filtre de SQL ou un `WHERE`.
+pairs = [n for n in range(10) if n % 2 == 0]
+print(pairs)
+
+# On peut transformer au passage : le resultat de l'expression est mis dans
+# la liste, pas la valeur de boucle.
+longueur = [len(mot) for mot in ['un', 'deux', 'trois']]
+print(longueur)
+
+# Le `for` de la comprehension est isole : `n` garde sa valeur d'avant.
+n = 100
+print([n for n in [1, 2, 3]], n)
+
+# Meme construction pour un dictionnaire et pour un ensemble.
+print({lettre: ord(lettre) for lettre in 'abc'})
+print({n % 3 for n in range(10)})
+
+# ------------------------------------------------------------- imbrication
+
+# Les boucles s'imbriquent par indentation. Une indentation de 4 espaces
+# est la convention du projet.
+for ligne in range(3):
+    for colonne in range(3):
+        if ligne == colonne:
+            print('X', end='')
+        else:
+            print('.', end='')
+    print()
+
+# ------------------------------------------------------------- exercices
+
+# Exercice 1 : affichez les nombres de 1 a 20, separes par un espace, puis le
+# total de leurs chiffres (1 -> 1, 10 -> 1, 11 -> 2).
+# Correction :
+#   total = 0
+#   for n in range(1, 21):
+#       print(n, end=' ')
+#       total += len(str(n))
+#   print()
+#   print('chiffres:', total)
+
+# Exercice 2 : pour une liste de mots, affichez le plus long, et tous ceux qui
+# ont exactement cette longueur.
+# Correction :
+#   mots = ['chat', 'souris', 'chien', 'rat']
+#   plus_long = max(mots, key=len)
+#   print(plus_long, [m for m in mots if len(m) == len(plus_long)])
+
+# Exercice 3 : detectez si un nombre est premier, sans fonction (la fonction
+# vient a la lecon 3).
+# Correction :
+#   n = 29
+#   if n < 2:
+#       print(n, 'n\'est pas premier')
+#   for d in range(2, int(n ** 0.5) + 1):
+#       if n % d == 0:
+#           print(n, 'n\'est pas premier')
+#           break
+#   else:
+#       print(n, 'est premier')

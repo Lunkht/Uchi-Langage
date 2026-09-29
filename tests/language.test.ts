@@ -366,6 +366,24 @@ test('les comprehensions produisent listes, ensembles et dictionnaires', () => {
   );
 });
 
+test('les operations d\'ensemble acceptent un ou plusieurs operandes', () => {
+  // `union`, `intersection`, `difference`, `symmetric_difference` et `update`
+  // sont variadiques comme en Python : sans borne haute.
+  assert.equal(run('a = {1, 2}\nprint(sorted(a.union({2, 3})))\n'), '[1, 2, 3]\n');
+  assert.equal(run('a = {1, 2}\nprint(sorted(a.union({2}, {9})))\n'), '[1, 2, 9]\n');
+  assert.equal(run('a = {1, 2, 3}\nb = {2, 3, 4}\nprint(sorted(a.intersection(b)))\n'), '[2, 3]\n');
+  assert.equal(run('a = {1, 2, 3}\nb = {2, 3, 4}\nprint(sorted(a.difference(b)))\n'), '[1]\n');
+  assert.equal(run('a = {1, 2}\nb = {2, 3}\nprint(sorted(a.symmetric_difference(b)))\n'), '[1, 3]\n');
+  assert.equal(
+    run('print({1, 2}.issubset({1, 2, 3}), {1}.issuperset({1}), {1}.isdisjoint({2}))\n'),
+    'True True True\n',
+  );
+  assert.equal(run('a = {1}\na.update({2}, {3})\nprint(sorted(a))\n'), '[1, 2, 3]\n');
+  // Sans operande, l'ensemble est rendu tel quel ; un non-ensemble est refuse.
+  assert.equal(run('print(sorted({1, 2}.union()))\n'), '[1, 2]\n');
+  assert.equal(failure('{1}.union([2])\n'), "TypeError: 'union' attend des ensembles, recu 'list'");
+});
+
 test('le modulo suit Python, y compris avec les operandes negatifs', () => {
   assert.equal(run('print(7 % 3, 1 % 3, 0 % 3)\n'), '1 1 0\n');
   assert.equal(run('print(-7 % 3, 7 % -3, -7 % -3)\n'), '2 -2 -1\n');
@@ -436,6 +454,19 @@ test('les f-strings auto-documentees restituent le `=`', () => {
   assert.equal(run('print(f\'{f"{3.1415=:.1f}":*^20}\')\n'), '*****3.1415=3.1*****\n');
   // Les comparaisons ne sont pas prises pour un `=` de debogage.
   assert.equal(run('x = 3\nprint(f"{x==3}", f"{x!=3}", f"{x>=3}")\n'), 'True False True\n');
+});
+
+test('les espaces d\'une f-string font partie du texte', () => {
+  // L'espace qui suit `}` est du texte, pas de la mise en forme du source.
+  assert.equal(run('print(f"a {1} b")\n'), 'a 1 b\n');
+  assert.equal(run('print(f"{1} b", f"a {1}", f"x {1} y {2} z")\n'), '1 b a 1 x 1 y 2 z\n');
+  assert.equal(run('print(f"  {7}  ")\n'), '  7  \n');
+  assert.equal(run('print(f"a {1}{2} b", f"debut {1}")\n'), 'a 12 b debut 1\n');
+  // Un retour a la ligne et un `#` restent du texte, comme dans `"""`.
+  assert.equal(run('print(f"""a\nb""")\n'), 'a\nb\n');
+  assert.equal(run('print(f"{1} # pas un commentaire")\n'), '1 # pas un commentaire\n');
+  // Un `\"` echappe reste un guillemet, pas une fin de chaine.
+  assert.equal(run('print(f"a \\" b")\n'), 'a " b\n');
 });
 
 // ----------------------------------------------------------------- methodes

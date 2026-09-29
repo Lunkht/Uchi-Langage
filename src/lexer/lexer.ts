@@ -181,6 +181,15 @@ class Lexer {
     const start = this.pos;
     const c = this.peek();
 
+    // -- Textes litteral d'une f-string (avec `{{` et `}}` echappes)
+    // Avant tout le reste : entre deux interpolations, l'espace, le `#` et le
+    // saut de ligne font partie du texte. Les saut d'espaces general de la
+    // boucle ci-dessous les consomme sinon, et `"  {n}  "` perd ses espaces.
+    if (this.scanningFStringText()) {
+      this.scanFStringText();
+      return;
+    }
+
     // -- Espaces, tabulations
     if (c === ' ' || c === '\t' || c === '\r') {
       this.pos++;
@@ -203,12 +212,6 @@ class Lexer {
     // -- Commentaires
     if (c === '#') {
       while (!this.atEnd() && this.peek() !== '\n') this.pos++;
-      return;
-    }
-
-    // -- Textes litteral d'une f-string (avec `{{` et `}}` echappes)
-    if (this.scanningFStringText()) {
-      this.scanFStringText();
       return;
     }
 

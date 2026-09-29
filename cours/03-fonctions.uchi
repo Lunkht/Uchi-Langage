@@ -1,0 +1,165 @@
+# Lecon 3 : fonctions
+#
+# Objectif : decouper un programme en morceaux reutilisables, et comprendre
+# comment Uchi passe les arguments.
+# Executer avec : npm run uchi -- run cours/03-fonctions.uchi
+
+# ------------------------------------------------------------- definir
+
+# `def` cree une fonction. Elle ne fait rien tant qu'on ne l'appelle pas, et
+# `return` rend la main a l'appelant avec une valeur.
+def saluer(nom):
+    return f'Bonjour {nom}'
+
+print(saluer('Ada'), saluer('Grace'))
+
+# Sans `return`, la fonction rend None.
+def rien():
+    pass
+
+print(rien(), type(rien()))
+
+# Le corps d'une fonction peut contenir n'importe quelle instruction, y
+# compris des appels a d'autres fonctions definies avant ou apres.
+
+# ------------------------------------------------------------- parametres
+
+# Les parametres ont un nom. Avec une valeur par defaut, l'appelant peut
+# s'en passer ; l'ordre compte pour les arguments positionnels.
+def volume(largeur, hauteur, profondeur=1):
+    return largeur * hauteur * profondeur
+
+print(volume(2, 3), volume(2, 3, 4), volume(2, hauteur=5))
+
+# Apres `*`, les parametres sont nommes uniquement : c'est la seule facon
+# de les passer, et leur ordre n'importe plus.
+def fiche(identifiant, *, taille=1, couleur='noir'):
+    return (identifiant, taille, couleur)
+
+print(fiche('x1'), fiche('x1', couleur='rouge'), fiche('x1', taille=3))
+
+# `*args` regroupe les arguments positionnels restants dans un tuple.
+# `**kwargs` regroupe les arguments nommes restants dans un dictionnaire.
+def resume(*args, **kwargs):
+    print('  positionnels:', args)
+    print('  nommes      :', sorted(kwargs.items()))
+    return len(args) + len(kwargs)
+
+print('total', resume(1, 2, 3, taille=2, couleur='bleu'))
+
+# L'etoile sert aussi a transmettre une liste en positionnel et un
+# dictionnaire en nomme, sans les nommer un par un.
+def total(prix, quantite, remise=0):
+    return prix * quantite - remise
+
+prix = [10, 3]
+options = {'remise': 5}
+print(total(*prix, **options))
+
+# ------------------------------------------------------------- portee
+
+# Une fonction voit les variables definies avant elle, mais ses propres
+# variables meurent a la fin de l'appel : c'est la portee locale.
+compteur_global = 0
+
+def ajouter(n):
+    global compteur_global   # sans cette ligne, on ne modifierait qu'une copie
+    compteur_global += n
+    return compteur_global
+
+ajouter(5)
+ajouter(5)
+print(compteur_global)
+
+# Sans `global`, l'affectation cree une variable locale qui masque le
+# global : le global reste intact.
+def masquer():
+    compteur_global = 100
+    return compteur_global
+
+print(masquer(), compteur_global)
+
+# `nonlocal` sert pour les fonctions imbriquees : la variable appartient a la
+# fonction englobante, pas au global.
+def fabrique_compteur():
+    total = 0
+
+    def incrementer(n=1):
+        nonlocal total
+        total += n
+        return total
+
+    return incrementer
+
+compteur = fabrique_compteur()
+print(compteur(), compteur(), compteur(10))
+
+# ------------------------------------------------------------- fonctions = valeurs
+
+# Une fonction est une valeur : on la met dans une liste, on la passe en
+# argument, on la renvoie. C'est ce qui rend `sorted(key=...)` possible.
+def au_carre(n):
+    return n * n
+
+print([au_carre(n) for n in range(4)])
+print(sorted(['bbb', 'a', 'cc'], key=len))
+print(sorted([1, -2, 3], key=lambda n: abs(n)))
+
+# Une lambda est une fonction anonyme, limitee a une seule expression.
+doubler = lambda n: n * 2
+print(doubler(21), sorted([(2, 'b'), (1, 'a')], key=lambda p: p[0]))
+
+# ------------------------------------------------------------- recursion
+
+# Une fonction recursive s'appelle elle-meme. Il faut toujours un cas
+# d'arret, sinon la pile s'Epuisse et l'appel leve RecursionError.
+def factorielle(n):
+    if n <= 1:
+        return 1
+    return n * factorielle(n - 1)
+
+def fibonacci(n):
+    if n < 2:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+
+print(factorielle(6), fibonacci(10))
+
+# Chaque appel a sa propre copie des variables : c'est ce qui rend la
+# recursion possible.
+def profond(n):
+    if n == 0:
+        return 'base'
+    return profond(n - 1) + '/x'
+
+print(profond(3))
+
+# Uchi limite la profondeur a 2000 appels, comme tout langage a pile. Pour
+# une taille de donnee inconnue, une boucle est plus sure que la recursion.
+#   print(factorielle(5000))   -> RecursionError
+
+# ------------------------------------------------------------- exercices
+
+# Exercice 1 : ecrivez `est_pair(n)` qui rend True ou False, sans utiliser `%`.
+# Correction :
+#   def est_pair(n):
+#       return n % 2 == 0
+#   print(est_pair(4), est_pair(7))
+
+# Exercice 2 : ecrivez `compte_mots(texte)` qui rend un dictionnaire du nombre
+# d'apparitions de chaque mot, en minuscules. Indice : `texte.lower().split()`.
+# Correction :
+#   def compte_mots(texte):
+#       compte = {}
+#       for mot in texte.lower().split():
+#           compte[mot] = compte.get(mot, 0) + 1
+#       return compte
+#   print(compte_mots('Le chat dort, le chien dort'))
+
+# Exercice 3 : ecrivez `aplatir(listes)` qui prend une liste de listes et rend
+# une seule liste a plat, recursivement.
+# Correction :
+#   def aplatir(listes):
+#       if listes == []:
+#           return []
+#       return listes[0] + aplatir(listes[1:])

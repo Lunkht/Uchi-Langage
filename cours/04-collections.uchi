@@ -1,0 +1,175 @@
+# Lecon 4 : listes, dictionnaires, ensembles et tuples
+#
+# Objectif : choisir la bonne structure pour rangees de donnees, et eviter
+# les alias piegeux.
+# Executer avec : npm run uchi -- run cours/04-collections.uchi
+
+# ------------------------------------------------------------- listes
+
+# Une liste ordonne des elements modifiables. On y ajoute, retire, decoupe.
+nombres = [3, 1, 4, 1, 5]
+nombres.append(9)          # a la fin
+nombres.insert(0, 0)       # a une position
+nombres.remove(1)          # la premiere occurrence
+dernier = nombres.pop()    # et on recupere la valeur retiree
+nombres.sort()
+nombres.reverse()
+print(nombres, dernier, len(nombres))
+
+# `sort` trie sur place et rend None ; `sorted` rend une nouvelle liste.
+nombres = [3, 1, 2]
+print(nombres.sort(), nombres)          # None : la liste a change
+print(nombres, sorted(nombres))        # la nouvelle liste, a part
+print(sorted(nombres, reverse=True))
+
+# `sort` et `sorted` prennent une cle de tri. Pour trier des paires, l'ordre
+# compare le premier element, puis le second en cas d'egalite.
+gens = [('Zoe', 30), ('Ali', 25), ('Bo', 30)]
+print(sorted(gens))
+print(sorted(gens, key=lambda g: g[0]))
+print(sorted(gens, key=lambda g: -g[1]))
+
+# Les tranches (decoupages) indices de depart a fin, fin exclue.
+lettres = list('abcdef')
+print(lettres[1:3], lettres[:2], lettres[3:], lettres[::2], lettres[::-1])
+
+# ------------------------------------------------------------- alias et copies
+
+# Le piege le plus courant du langage. `copie = liste` ne copie rien : les
+# deux noms pointent sur la meme liste, donc modifier l'une modifie l'autre.
+original = [1, 2]
+alias = original
+copie = original.copy()
+alias.append(99)
+print(original, copie)     # original contient 99, copie non
+
+# Pour une vraie copie, il faut `list(...)`, `.copy()`, ou une comprehension.
+# `[:]` fait aussi une copie.
+liste = [[1], [2]]
+plate = [sous_liste[:] for sous_liste in liste]
+plate[0].append(9)
+print(liste, plate)
+
+# ------------------------------------------------------------- depaquetage
+
+# On peut distribuer une liste entre plusieurs noms, et garder le reste.
+premier, second, *autres = [1, 2, 3, 4, 5]
+print(premier, second, autres)
+
+# L'echange de deux valeurs, sans variable temporaire.
+a, b = 1, 2
+a, b = b, a
+print(a, b)
+
+# ------------------------------------------------------------- dictionnaires
+
+# Un dictionnaire associe des cles a des valeurs. Les cles doivent etre
+# hachables : chaines, nombres, tuples, ensembles. Pas de liste.
+stock = {'pomme': 12, 'kiwi': 3}
+stock['mangue'] = 7
+print(stock['pomme'], stock['kiwi'], len(stock))
+print(stock.get('abricot', 0))     # 0 au lieu d'une erreur
+print('mangue' in stock, 'poire' in stock)
+
+# Parcourir un dictionnaire : par defaut on a les cles, `.items()` donne les
+# paires, `.values()` les valeurs.
+for cle in stock:
+    print(cle, end=' ')
+print()
+for cle, valeur in stock.items():
+    print(f'{cle}={valeur}', end=' ')
+print()
+for valeur in stock.values():
+    print(valeur, end=' ')
+print()
+
+# `pop` retire et rend ; `update` fusionne ; `copy` copie vraiment.
+stock.update({'poire': 5, 'kiwi': 4})
+retire = stock.pop('poire')
+doublure = stock.copy()
+doublure['kiwi'] = 99
+print(retire, stock['kiwi'], doublure['kiwi'])
+
+# Un dictionnaire se construit et se filtre en une ligne.
+prix = {'a': 10, 'b': 20, 'c': 30}
+print({c: p for c, p in prix.items() if p >= 20})
+print({c.upper(): p * 2 for c, p in prix.items()})
+
+# Lire une cle absente leve KeyError, comme en Python.
+#   print(stock['poire'])     -> KeyError
+
+# ------------------------------------------------------------- ensembles
+
+# Un ensemble ne garde pas d'ordre et elimine les doublons : parfait pour
+# savoir " qui est deja vu ".
+villes = ['Paris', 'Lyon', 'Paris', 'Nice', 'Lyon']
+uniques = set(villes)
+print(uniques, len(villes), len(uniques), 'Paris' in uniques)
+
+lettre = set('anticonstitutionnellement')
+print('a' in lettre, len(lettre))
+
+# Les operations d'ensembles, avec un ou plusieurs operandes.
+a = {1, 2, 3}
+b = {2, 3, 4}
+print(sorted(a.union(b)), sorted(a.intersection(b)), sorted(a.difference(b)))
+print(sorted(a.symmetric_difference(b)), a.issubset({1, 2, 3, 4}))
+
+# `add` et `remove` modifient l'ensemble ; un element absent donne KeyError.
+c = set()
+c.add(1)
+c.add(1)
+print(c)
+#   c.remove(42)    -> KeyError
+
+# Un ensemble se construit par comprehension, comme une liste.
+print({lettre for lettre in 'anticonstitutionnellement' if lettre in 'aeiouy'})
+
+# ------------------------------------------------------------- tuples
+
+# Un tuple est une liste qu'on ne peut pas modifier. On l'utilise quand les
+# donnees sont fixes : coordonnees, couples, valeurs de retour.
+point = (3, 4)
+print(point[0], point[1], len(point), point + (5,))
+try:
+    point[0] = 9
+except TypeError as erreur:
+    print('impossible de modifier un tuple :', erreur)
+
+# Depaquetage en cascade, pratique pour lire des paires.
+for x, y in [(1, 2), (3, 4)]:
+    print(x, y, end=' ')
+print()
+
+# Enumeration et tri se combinent bien avec les paires.
+paires = sorted({(1, 'un'), (2, 'deux')})
+print(paires)
+
+# ------------------------------------------------------------- exercices
+
+# Exercice 1 : donnez une liste de nombres, rendez un dictionnaire
+# `{'pair': [...], 'impair': [...]}`. Un seul parcours suffit.
+# Correction :
+#   def separe(nombres):
+#       groups = {'pair': [], 'impair': []}
+#       for n in nombres:
+#           groups['pair' if n % 2 == 0 else 'impair'].append(n)
+#       return groups
+#   print(separe([1, 2, 3, 4]))
+
+# Exercice 2 : comptez les mots d'un texte et affichez les mots tries par
+# frequence decroissante, sans utiliser deux fois la meme liste.
+# Correction :
+#   texte = 'le chat le chien le chat'
+#   compte = {}
+#   for mot in texte.split():
+#       compte[mot] = compte.get(mot, 0) + 1
+#   for mot, n in sorted(compte.items(), key=lambda p: -p[1]):
+#       print(mot, n)
+
+# Exercice 3 : un ensemble ne garde pas l'ordre, donc `pop` sur un ensemble
+# n'est pas deterministe. Ecrivez une fonction qui rend quand meme une
+# valeur de l'ensemble, et expliquez pourquoi le resultat peut changer.
+# Correction :
+#   def un_element(ensemble):
+#       return next(iter(ensemble))    # `iter` et `next` vus en lecon 2

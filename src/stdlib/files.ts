@@ -254,6 +254,10 @@ export function createFileBuiltins(fileRoot: string | null = null): Array<[strin
   method('readline', (self) => readLine(self));
   method('readlines', (self) => readLines(self));
 
+  // `for ligne in f` : le fichier se comporte comme une liste de lignes.
+  // L'iteration est immediate, comme `readlines()`, et non paresseuse.
+  method('__iter__', (self) => readLines(self));
+
   method('write', (self, args) => {
     arityCheck(args, 'write', 2);
     return write(self, expectString(args.positional[1] as UchiValue, 'write()'));

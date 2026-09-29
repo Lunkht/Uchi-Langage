@@ -6,3 +6,10 @@ tmp/
 out/
 *.tsbuildinfo
 .uchi-cache/
+
+# Fichiers ecrits par les lecons 6 et 7
+cours/notes.txt
+cours/copie.txt
+cours/accents.txt
+cours/numerote.txt
+cours/commande.json

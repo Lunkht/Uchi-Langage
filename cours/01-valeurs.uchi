@@ -1,0 +1,139 @@
+# Lecon 1 : valeurs, types et affichage
+#
+# Objectif : savoir ecrire une valeur, la convertir, la comparer et l'afficher.
+# Executer avec : npm run uchi -- run cours/01-valeurs.uchi
+#
+# Ce qu'on assume ici : pas d'accent dans le code, comme dans le reste du
+# projet. Les commentaires sont en ASCII pour que le fichier reste lisible
+# partout.
+
+# ------------------------------------------------------------- afficher
+
+# `print` accepte plusieurs valeurs, les separe par un espace et termine par
+# un saut de ligne. `sep` et `end` changent ces deux comportements.
+print('bonjour')
+print('a', 'b', 1, True, None)
+print('separateur', 'et', 'reponse', sep=' | ')
+print('sans retour a la ligne', end='')
+print(' -> la suite est sur la meme ligne')
+print()
+
+# ------------------------------------------------------------- types
+
+# Uchi a les types de Python : int, float, str, bool, None, list, tuple,
+# dict, set. `type` dit lequel, `isinstance` demande "est-ce un de ceux-la".
+print(type(42), type(4.2), type('texte'), type(True), type(None))
+print(type([1, 2]), type((1, 2)), type({'a': 1}), type({1, 2}))
+print(isinstance(42, int), isinstance(42, (int, float)), isinstance('a', str))
+
+# Les booleens sont des nombres : `True` vaut 1, `False` vaut 0.
+print(True + True, True * 3, int(True), bool(0), bool([0]))
+
+# Aucune valeur n'est " vide " : 0, '', [], {} et None sont faux.
+print(bool(0), bool(0.0), bool(''), bool([]), bool({}), bool(None))
+
+# ------------------------------------------------------------- operateurs
+
+print(7 + 2, 7 - 2, 7 * 2, 7 / 2)     # `/` donne toujours un float
+print(7 // 2, -7 // 2, 7 % 2, 2 ** 10)  # division entiere, reste, puissance
+
+# `**` a la priorite la plus forte, puis `* / // %`, puis `+ -`, puis les
+# comparaisons, puis `not`, puis `and`, puis `or`.
+print(2 + 3 * 4, (2 + 3) * 4, -2 ** 2, not 0 and 1 or 0)
+
+# Les comparaisons s'enchainent, comme en Python.
+print(1 < 2 < 3, 3 > 5 > 7, 1 == 1.0, 'a' != 'b', 'a' < 'b')
+print(1 in [1, 2], 'a' in 'chat', 'cle' in {'cle': 1})
+
+# ------------------------------------------------------------- conversions
+
+print(int('42'), int('  42  '), float('4.2'), str(42), bool('texte'))
+print(int(4.9), int(-4.9), round(4.567, 2), round(4.567), abs(-3))
+print(divmod(17, 5), pow(2, 10), pow(2, 10, 7))  # quotient et reste, modulo
+
+# Comme en Python, `int` exige un entier ecrit en toutes lettres : `int('42')`
+# marche, `int('42.9')` leve ValueError. Pour un reel, il faut `float` d'abord.
+#   print(int('42.9'))              -> ValueError
+#   print(int(float('42.9')))       -> 42
+
+# ------------------------------------------------------------- chaines
+
+# Une chaine est une suite de caracteres. On la lit par indice, on la
+# decoupe par tranches, et on peut la multiplier.
+print('Uchi'[0], 'Uchi'[-1], 'Uchi'[1:3], 'Uchi'[:2], 'Uchi'[::-1])
+print('ab' * 3, 'ab' + 'cd', len('Uchi'))
+
+# Les methodes renvoient une nouvelle chaine : l'originale ne bouge pas.
+print('  Uchi  '.strip(), 'uchi'.upper(), 'UCHI'.lower(), 'uchi'.title())
+print('a,b,c'.split(','), '-'.join(['a', 'b', 'c']), 'abcabc'.count('b'))
+print('bonjour'.find('j'), 'bonjour'.replace('o', '0'), 'bonjour'.endswith('r'))
+
+# ------------------------------------------------------------- f-strings
+
+# La f-string evalue `{...}` et met le resultat dans le texte. C'est la
+# maniere la plus lisible de composer un texte.
+prenom = 'Ada'
+age = 36
+print(f'{prenom} a {age} ans')
+print(f'{prenom!r} : la chaine avec ses guillemets')
+print(f'{"|":<10}| aligne a gauche')
+print(f'{3.14159:.2f} {1234567:,} {42:5d}')
+
+# `{x=}` ecrit l'expression et sa valeur : tres utile pour retrouver d'ou
+# vient une valeur suspecte.
+print(f'{prenom=}', f'{age=:.1f}')
+
+# Pour aligner des colonnes, on verifie la largeur et on complete.
+for ligne in ['un', 'deux', 'trois']:
+    print(f'{ligne:<10}|')
+
+# `str` a besoin d'espece autour des accolades, qui sont alors interpretees.
+print(f'{{literal}}', f'{"3" * 3}')
+
+# ------------------------------------------------------------- longueur et tri
+
+print(len([1, 2, 3]), len({'a': 1, 'b': 2}), len('abc'))
+print(min([3, 1, 2]), max([3, 1, 2]), sum([1, 2, 3]), sum([1.5, 2.5]))
+print(sorted([3, 1, 2]), sorted(['b', 'a']), sorted([3, 1, 2], reverse=True))
+print(min(['bb', 'a', 'ccc'], key=len), max([1, -5, 3], key=abs))
+
+# ------------------------------------------------------------- listes
+
+# Une liste se cree avec des crochets et se modifie sur place.
+nombres = [1, 2, 3]
+nombres.append(4)
+nombres.insert(0, 0)
+print(nombres, len(nombres), nombres[0], nombres[-1])
+print(nombres[1:3], nombres[:2], nombres[2:], nombres[::-1])
+
+# Piege classique : `copie = liste` ne copie pas, les deux noms designent la
+# meme liste. Il faut passer par `list(...)` ou `.copy()`.
+original = [1, 2]
+alias = original
+reel = original.copy()
+alias.append(99)
+print(original, reel)   # original a change, reel non
+
+# ------------------------------------------------------------- exercices
+
+# Exercice 1 : affichez le nom, l'age et la taille moyenne sur une ligne, puis
+# le meme resultat dans un tableau de trois colonnes alignees.
+# Correction :
+#   moyenne = 1.75
+#   print(f'{"nom":<10}{"age":<6}{"taille":>8}')
+#   print(f'{"Ada":<10}{36:<6}{1.75:>8.2f}')
+
+# Exercice 2 : convertissez la chaine "  42  " en entier, puis expliquez avec
+# `int()` et `.strip()` si l'ordre change le resultat.
+# Correction :
+#   print(int('  42  '))            # 42, les espaces sont ignores
+#   print(int('  42 '.strip()))     # 42 aussi : les deux marchent
+#   print(int('42 4'))              # ValueError
+
+# Exercice 3 : ecrivez une fonction `etiquette(nom, score)` qui rend
+# "Ada: 8.5/10" et utilisez une f-string pour l'afficher. (La fonction sera
+# vue en detail dans la lecon 3, on peut l'ecrire des maintenant.)
+# Correction :
+#   def etiquette(nom, score):
+#       return f'{nom}: {score}/10'
+#   print(etiquette('Ada', 8.5))

@@ -871,7 +871,7 @@ export function setMethods(): MethodTable {
     combine: (a: UchiSet, b: UchiSet) => UchiSet,
   ) => {
     table.set(name, (args) => {
-      arityCheck(args, name, 1, -1);
+      arityAtLeast(args, name, 1);
       let result = new UchiSet(self(args).values());
       for (const other of others(args)) {
         if (!(other instanceof UchiSet)) {
@@ -894,7 +894,7 @@ export function setMethods(): MethodTable {
 
   const relation = (name: string, keep: (a: UchiSet, b: UchiSet) => boolean) => {
     table.set(name, (args) => {
-      arityCheck(args, name, 1, -1);
+      arityAtLeast(args, name, 1);
       const a = self(args);
       for (const other of others(args)) {
         if (!(other instanceof UchiSet)) {
@@ -911,7 +911,7 @@ export function setMethods(): MethodTable {
   relation('isdisjoint', (a, b) => ![...a.values()].some((v) => b.has(v)));
 
   table.set('update', (args) => {
-    arityCheck(args, 'update', 1, -1);
+    arityAtLeast(args, 'update', 1);
     const s = self(args);
     for (const other of others(args)) {
       if (!(other instanceof UchiSet)) {

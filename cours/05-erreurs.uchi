@@ -1,0 +1,182 @@
+# Lecon 5 : erreurs et exceptions
+#
+# Objectif : faire face a un cas imprevu sans que le programme s'ecroule, et
+# savoir lever une erreur soi-meme.
+# Executer avec : npm run uchi -- run cours/05-erreurs.uchi
+
+# ------------------------------------------------------------- try / except
+
+# Une erreur non prevue arrete le programme. `try` permet d'essayer, et
+# `except` de rattraper. On ne le fait que si on sait quoi faire de l'erreur.
+def ratio(a, b):
+    try:
+        return a / b
+    except ZeroDivisionError:
+        return None   # on decide que " pas de quotient " se dit par None
+
+print(ratio(1, 2), ratio(1, 0))
+
+# `except` seul rattrape tout, mais on perd le type de l'erreur. mieux vaut
+# lister les erreurs attendues, de la plus precise a la plus generale.
+def analyser(texte):
+    try:
+        valeur = int(texte)
+    except ValueError:
+        return 'pas un nombre'
+    except TypeError:
+        return 'pas du texte'
+    return valeur
+
+print(analyser('42'), analyser('abc'), analyser([1, 2]))
+
+# `as` nomme l'erreur, ce qui permet d'afficher son message.
+try:
+    int('abc')
+except ValueError as erreur:
+    print('erreur attrapee :', erreur)
+
+# On peut aussi attraper la famille parente. ZeroDivisionError descend
+# d'ArithmeticError, qui descend d'Exception : `except ArithmeticError` couvre
+# les deux, `except Exception` couvre tout.
+try:
+    1 / 0
+except ArithmeticError as erreur:
+    print('famille arithmetique :', erreur)
+
+# On peut Finally / else. `else` s'execute si aucune erreur n'a eu lieu,
+# `finally` s'execute dans tous les cas, meme apres une erreur.
+def journaliser(action):
+    try:
+        return action()
+    except Exception as erreur:
+        return f'echec : {erreur}'
+    else:
+        return 'succes'
+    finally:
+        print('  (fin du contexte)')
+
+print(journaliser(lambda: 42))
+print(journaliser(lambda: int('x')))
+
+# ------------------------------------------------------------- lever
+
+# `raise` declenche une erreur. On leve toujours une erreur qu'on peut
+# decrire, pour que l'appelant sache quoi faire.
+def demander_age(age):
+    if age < 0:
+        raise ValueError('un age ne peut pas etre negatif')
+    if age > 130:
+        raise ValueError('cet age est invraisemblable')
+    return age
+
+for age in [20, -1, 200]:
+    try:
+        print('age accepte :', demander_age(age))
+    except ValueError as erreur:
+        print('refuse :', erreur)
+
+# Lever une erreur precise vaut mieux qu'un message obscur : l'appelant peut
+# alors la traiter a part.
+def racine_carree(x):
+    if x < 0:
+        raise ValueError('la racine d\'un negatif n\'existe pas')
+    return x ** 0.5
+
+try:
+    racine_carree(-4)
+except ValueError as erreur:
+    print(erreur)
+
+# ------------------------------------------------------------- ses propres erreurs
+
+# Une exception est une classe qui descend d'Exception (ou d'une de ses
+# filles). On peut donc ecrire des erreurs propres a un programme.
+# Le message se passe a la levee, il n'y a pas d'attribut a confectionner.
+class SoldeInsuffisant(Exception):
+    pass
+
+class Compte:
+    def __init__(self, solde):
+        self.solde = solde
+
+    def retirer(self, montant):
+        if montant > self.solde:
+            raise SoldeInsuffisant(f'il manque {montant - self.solde:.2f} euros')
+        self.solde -= montant
+        return self.solde
+
+compte = Compte(50)
+try:
+    compte.retirer(80)
+except SoldeInsuffisant as erreur:
+    print('refus :', erreur)
+
+# On attrape par le nom de l'erreur, meme si l'objet attrape expose peu de
+# choses : `erreur` porte le message, et c'est la clause `except` qui permet
+# de distinguer les cas.
+for action in [
+    lambda: [1, 2][10],        # IndexError
+    lambda: {'a': 1}['b'],     # KeyError
+    lambda: 1 / 0,             # ZeroDivisionError
+    lambda: int('abc'),        # ValueError
+    lambda: len(3),            # TypeError
+    lambda: open('absent.txt'),  # FileNotFoundError
+]:
+    try:
+        action()
+    except IndexError as erreur:
+        print('indice :', erreur)
+    except (KeyError, ValueError) as erreur:
+        print('cle ou valeur :', erreur)
+    except ZeroDivisionError as erreur:
+        print('division :', erreur)
+    except TypeError as erreur:
+        print('type :', erreur)
+    except FileNotFoundError as erreur:
+        print('fichier :', erreur)
+
+# ------------------------------------------------------------- delai d'execution
+
+# `run` accepte `--timeout N` : au-dela, le programme est arrete par une
+# exception TimeoutError, qu'on peut attraper. Utile pour un traitement long
+# dont on veut garder la main.
+#   npm run uchi -- run cours/05-erreurs.uchi --timeout 2
+#
+# Attention : le delai arrete les boucles du langage, pas une operation
+# native. Contre une expression reguliere catastrophique, seul Ctrl+C
+# arrete le programme.
+
+# ------------------------------------------------------------- exercices
+
+# Exercice 1 : ecrivez `diviser(a, b)` qui rend None au lieu de lever une
+# erreur quand b vaut zero, en utilisant `try`/`except`.
+# Correction :
+#   def diviser(a, b):
+#       try:
+#           return a / b
+#       except ZeroDivisionError:
+#           return None
+#   print(diviser(6, 3), diviser(6, 0))
+
+# Exercice 2 : ecrivez `lire_entier(texte)` qui rend l'entier, ou None si le
+# texte n'en est pas un, en distinguant les deux messages d'erreur possibles.
+# Correction :
+#   def lire_entier(texte):
+#       try:
+#           return int(texte)
+#       except ValueError:
+#           return None
+#       except TypeError:
+#           return None
+#   print(lire_entier('7'), lire_entier('sept'), lire_entier(None))
+
+# Exercice 3 : le `finally` s'execute meme si le `return` est deja calcule.
+# Expliquez ce que fait `mesurer` quand `numerate` leve une erreur.
+# Correction :
+#   def mesurer(numerate):
+#       try:
+#           return numerate()
+#       finally:
+#           print('  toujours execute, meme apres une erreur')
+#   print(mesurer(lambda: 10))
+#   print(mesurer(lambda: int('x')))

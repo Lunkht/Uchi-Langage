@@ -1,0 +1,181 @@
+# Lecon 7 : modules, JSON et texte
+#
+# Objectif : reutiliser du code dans un autre fichier, echanger des donnees
+# au format JSON, et manipuler du texte avec des expressions regulieres.
+#
+#   cd cours
+#   npm run uchi -- run 07-modules-json.uchi
+#
+# Cette lecon s'appuie sur le module voisin `outils.uchi`, dont le nom doit
+# etre un identifiant valide pour pouvoir etre importe.
+
+# ------------------------------------------------------------- modules
+
+# Un module est un fichier `.uchi` qui expose des definitions. `import` le
+# charge une fois ; ensuite on y accede par son nom.
+import outils
+
+print(outils.TAUX_TVA, outils.SEUIL_FRANCO_DE_PORT)
+print(outils.ttc(100), outils.port(10), outils.port(60))
+
+# `from ... import ...` amene directement le nom dans le programme, sans
+# passer par le nom du module. Moins verbeux, mais on ne sait plus d'ou il
+# vient quand on lit la ligne.
+from outils import ttc, commander
+
+print(ttc(19.99))
+print(commander(30.0, 2))
+
+# `import x` sans le reste rend le module entier ; `import x as y` lui donne
+# un autre nom, utile quand le nom du fichier n'est pas pratique.
+import outils as outils_de_cours
+
+print(outils_de_cours.resume([(12.0, 2), (3.5, 3)]))
+
+# Un module peut etre execute ou non. `__name__` vaut '__main__' quand on
+# lance le fichier, et le nom du module quand un autre fichier l'importe.
+# C'est le filet de securite habituel : le code de demonstration ne part pas
+# quand le module est importe ailleurs.
+print('nom de ce fichier :', __name__)
+
+# ------------------------------------------------------------- JSON
+
+# JSON est le format d'echange le plus courant : listes, dictionnaires,
+# chaines, nombres, booleens, null. On ecrit avec `dumps`, on relit avec
+# `loads`.
+import json
+
+commande = commander(30.0, 2)
+texte = json.dumps(commande)
+print(texte)
+
+relue = json.loads(texte)
+print(relue, relue['ttc'] == commande['ttc'])
+
+# `indent` rend le JSON lisible par un humain, `sort_keys` le rend stable,
+# ce qui est pratique pour comparer deux versions d'un fichier.
+print(json.dumps(commande, indent=2, sort_keys=True))
+
+# Un JSON invalide leve une erreur qu'on peut rattraper comme les autres.
+try:
+    json.loads('{oups}')
+except json.JSONDecodeError as erreur:
+    print('json invalide :', erreur)
+
+# Les valeurs None et True deviennent null et true en JSON.
+print(json.dumps({'rien': None, 'oui': True, 'nombre': 3}))
+
+# `dump` et `load` ecrivent et lisent directement dans un fichier, sans
+# passer par une chaine.
+with open('commande.json', 'w') as f:
+    json.dump(commande, f, indent=2)
+
+with open('commande.json') as f:
+    depuis_fichier = json.load(f)
+
+print(depuis_fichier == commande)
+
+# ------------------------------------------------------------- texte
+
+# Le module `string` gather les constantes utiles et quelques outils de texte.
+import string
+
+print(string.ascii_lowercase, string.digits)
+print(string.punctuation, len(string.printable))
+print(string.capwords('  uchi  /langage '))
+
+# `split` avec un second argument limite le nombre de morceaux : le dernier
+# morceau garde tout ce qui suit le separateur.
+nom = 'rapport.final.v2.uchi'
+print(nom.split('.'), nom.split('.', 1), nom.split('.', 2))
+print(string.split('a,b,c', sep=','), string.split('a,b,c', ',', 1))
+print(string.join(' / ', ['docs', 'lecon', '07']))
+
+# ------------------------------------------------------------- expressions regulieres
+
+# Une expression reguliere decrit une forme de texte. `re` vient de Python,
+# les motifs sont les memes.
+import re
+
+# `search` cherche n'importe ou et rend un objet `Match`, ou None.
+motif = re.search(r'\d+', 'chambre 12 lit 2')
+print(motif is not None, motif.group())
+
+# `match` colle le motif au debut, `fullmatch` exige que tout le texte
+# corresponde, `findall` rend toutes les trouvailles dans une liste.
+print(re.match(r'\d+', '12ab'), re.match(r'\d+', 'ab12'))
+print(re.fullmatch(r'\d+', '12a'))
+print(re.findall(r'\d+', 'a1 b22 c333'))
+
+# Les groupes numerotes capturent une partie du motif, ce qui permet
+# d'extraire les morceaux utiles.
+paire = re.search(r'(\d+)-(\d+)', 'lot 10-20 fini')
+print(paire.group(), paire.group(1), paire.group(2), paire.span())
+
+# Les groupes nommes rendent le code plus lisible quand on a plusieurs
+# valeurs a extraire.
+config = re.search(r'(?P<cle>\w+)=(?P<valeur>\d+)', 'version=42')
+print(config.group('cle'), config.group('valeur'), config.groupdict())
+
+# `sub` remplace toutes les occurrences. `\1` ou `\g<nom>` rappellent un
+# groupe capture.
+print(re.sub(r'\s+', '-', 'a  b   c'))
+print(re.sub(r'(?P<cle>\w+)@(?P<valeur>\w+)', r'\g<valeur>=<\g<cle>>', 'root@host'))
+print(re.sub(r'\d', '#', 'a1b2c3', count=2))
+
+# Un motif compile est reutilise sans etre reanalys a chaque appel. Les
+# options rendent la lecture plus courte.
+insensible = re.compile(r'uchi', re.I)
+print(insensible.search('UN LANGAGE UCHI'), insensible.findall('Uchi uchi'))
+
+# Un motif invalide leve une erreur a la compilation : c'est une faute de
+# frappe, autant la voir tot.
+#   re.compile('(pas ferme')     -> re.error
+
+# ------------------------------------------------------------- itertools sur du texte
+
+# Le tri d'un dictionnaire par valeur, frequent quand on analyse du texte.
+frequences = {}
+for mot in 'le chat le chien le chat dort'.split():
+    frequences[mot] = frequences.get(mot, 0) + 1
+
+for mot, n in sorted(frequences.items(), key=lambda p: -p[1])[:3]:
+    print(f'{mot:>7} : {n}')
+
+# Regrouper par premiere lettre, un classique du traitement de texte.
+par_lettre = {}
+for mot in sorted(frequences):
+    par_lettre.setdefault(mot[0], []).append(mot)
+
+print(par_lettre)
+
+# ------------------------------------------------------------- exercices
+
+# Exercice 1 : verifiez que le module se charge une seule fois. Importez-le
+# deux fois et affichez `__name__` du module pour le montrer.
+# Correction :
+#   import outils
+#   import outils
+#   print(outils.__name__)
+#   print('la deuxieme importation ne relance rien')
+
+# Exercice 2 : ecrivez une fonction `vers_json(donnees, chemin)` qui ecrit un
+# dictionnaire en JSON indente, et une fonction `depuis_json(chemin)` qui le
+# relit. Les deux doivent lever une erreur claire si le fichier est absent.
+# Correction :
+#   def vers_json(donnees, chemin):
+#       with open(chemin, 'w') as f:
+#           json.dump(donnees, f, indent=2, sort_keys=True)
+#   def depuis_json(chemin):
+#       try:
+#           with open(chemin) as f:
+#               return json.load(f)
+#       except FileNotFoundError as erreur:
+#           raise ValueError(f'configuration absente : {chemin}') from erreur
+
+# Exercice 3 : extrayez tous les nombres d'un texte et rendez leur somme, avec
+# une seule expression reguliere. Indice : `findall` rend une liste de
+# chaines, `sum` additionne des nombres, `map` applique `int` a chacune.
+# Correction :
+#   texte = 'j ai 3 chats et 2 chiens depuis 2019'
+#   print(sum(map(int, re.findall(r'\d+', texte))))

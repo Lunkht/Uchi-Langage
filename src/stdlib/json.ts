@@ -423,5 +423,19 @@ export const jsonModule: ModuleFactory = () => {
     }
   }));
 
+  // `load` fait l'inverse de `dump` : il lit tout le flux, puis le decode.
+  module.set('load', new UchiNativeFunction('load', (args, ctx) => {
+    arityCheck(args, 'load', 1);
+    checkNoExtraKeyword(args, 'load', LOAD_KEYWORDS);
+    const source = ctx.callValue(ctx.getAttribute(args.positional[0] as UchiValue, 'read'), []);
+    const text = expectString(source, 'load()');
+    try {
+      return new JsonReader(text).parse();
+    } catch (error) {
+      if (error instanceof JsonSyntaxError) decodeError(error, decodeErrorClass);
+      throw error;
+    }
+  }));
+
   return module;
 };

@@ -1,0 +1,127 @@
+# Lecon 6 : fichiers
+#
+# Objectif : lire et ecrire un fichier texte, et ne pas oublier de le fermer.
+#
+# Cette lecon ecrit des fichiers, et les chemins relatifs partent du repertoire
+# courant. Il faut donc lancer la lecon depuis le dossier `cours` :
+#
+#   cd cours
+#   npm run uchi -- run 06-fichiers.uchi
+#
+# Les trois fichiers produits (notes.txt, copie.txt, accents.txt) sont
+# ignores par git, on peut les supprimer apres la lecon.
+
+# ------------------------------------------------------------- ecrire et lire
+
+# `open` ouvre un fichier et rend un objet fichier. Le second argument est le
+# mode : 'r' lecture (par defaut), 'w' ecriture, 'a' ajout.
+with open('notes.txt', 'w') as f:
+    f.write('premiere ligne\n')
+    f.write('deuxieme ligne\n')
+
+# `with` ferme le fichier a la fin du bloc, meme si une erreur survient. C'est
+# la maniere recommandee : oublier `close` perd les donnees non ecrites.
+#   with open(...) as f:            le `f` n'existe que dans le bloc
+#   f = open(...) ... f.close()     equivalent, mais il ne faut pas oublier
+
+texte = open('notes.txt').read()
+print(repr(texte))
+print(len(texte))
+
+# `readline` rend une ligne a la fois (chaine vide a la fin), `readlines` toutes
+# les lignes dans une liste.
+f = open('notes.txt')
+print(repr(f.readline()), repr(f.readline()), repr(f.readline()))
+f.close()
+
+# Un fichier se parcourt ligne par ligne, comme une liste de lignes.
+for ligne in open('notes.txt'):
+    print('ligne:', repr(ligne))
+
+# Comme pour une liste, on peut filtrer ou transformer a la volee.
+lignes = [l.strip() for l in open('notes.txt') if l.strip()]
+print(lignes, len(lignes))
+
+# `writelines` ecrit toute une liste d'un coup, et 'a' ajoute sans ecraser.
+with open('notes.txt', 'a') as f:
+    f.writelines(['troisieme ligne\n', 'quatrieme ligne\n'])
+
+with open('notes.txt', 'w') as f:
+    f.write('titre\n')
+    f.writelines([f'{n}. un element\n' for n in range(1, 4)])
+
+print(open('notes.txt').read())
+
+# ------------------------------------------------------------- chemins
+
+# Un chemin relatif part du repertoire courant, pas du dossier du script.
+# C'est une difference avec Python, qui part du dossier du script. Pour un
+# fichier du dossier du script, on peut utiliser `__file__`, ou attendre un
+# chemin en argument :
+#   import sys
+#   if len(sys.argv) > 1:
+#       print('fichier fourni :', sys.argv[1])
+
+# Un fichier absent leve FileNotFoundError, qu'on peut rattraper.
+try:
+    open('inexistant.txt').read()
+except FileNotFoundError as erreur:
+    print('fichier absent :', erreur)
+
+# Un mode inconnu est une faute de frappe : ValueError, levee avant meme
+# d'avoir ouvert quoi que ce soit.
+#   open('notes.txt', 'wxyz')     -> ValueError
+
+# ------------------------------------------------------------- with : le motif
+
+# `with` sert pour tout objet qui a `__enter__` et `__exit__`. Il garantit la
+# liberation de la ressource, meme en cas d'exception au milieu du bloc.
+def premiere_ligne(chemin):
+    with open(chemin) as f:
+        for ligne in f:
+            return ligne.strip()   # sortir du `with` ferme quand meme le fichier
+
+print(premiere_ligne('notes.txt'))
+
+# On peut ouvrir plusieurs fichiers dans un seul `with`, separes par une
+# virgule : tout se ferme a la fin.
+with open('notes.txt') as source, open('copie.txt', 'w') as cible:
+    cible.write(source.read())
+
+print(open('copie.txt').read() == open('notes.txt').read())
+
+# Les chaines du code sont en ASCII par convention du projet. Pour ecrire un
+# accent ou un symbole, on utilise un echappement universel, ou `chr`.
+with open('accents.txt', 'w') as f:
+    f.write('caf\u00e9 ' + chr(0x2603) + '\n')
+print(repr(open('accents.txt').read()))
+
+# ------------------------------------------------------------- exercices
+
+# Exercice 1 : comptez les lignes et les mots d'un fichier texte, sans le
+# charger entierement en memoire.
+# Correction :
+#   lignes = 0
+#   mots = 0
+#   with open('notes.txt') as f:
+#       for ligne in f:
+#           lignes += 1
+#           mots += len(ligne.split())
+#   print('lignes:', lignes, 'mots:', mots)
+
+# Exercice 2 : recopiez un fichier ligne par ligne dans un autre, en
+# prefixant chaque ligne par son numero.
+# Correction :
+#   with open('notes.txt') as source, open('numerote.txt', 'w') as cible:
+#       for numero, ligne in enumerate(source, 1):
+#           cible.write(f'{numero}. {ligne}')
+
+# Exercice 3 : ecrivez `chercher(fichier, mot)` qui rend la premiere ligne
+# contenant `mot`, ou None. Le fichier doit se fermer meme sans resultat.
+# Correction :
+#   def chercher(fichier, mot):
+#       with open(fichier) as f:
+#           for ligne in f:
+#               if mot in ligne:
+#                   return ligne.strip()
+#       return None

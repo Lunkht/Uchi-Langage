@@ -119,14 +119,34 @@ print('carrés  :', [n * n for n in range(6) if n % 2 == 0])
 `examples/tournee.uchi` fait le tour des fonctions, classes, exceptions, formatage,
 expressions régulières et JSON.
 
+## Cours
+
+`cours/` contient huit leçons pour apprendre le langage, chacune en deux
+fichiers : une fiche `.md` qui reprend les points à retenir et les pièges, et un
+`.uchi` exécutable qui est la leçon elle-même, exercices et corrections compris.
+
+```bash
+npm run uchi -- run cours/01-valeurs.uchi
+```
+
+Les leçons 6 et 7 écrivent des fichiers et importent un module voisin : elles se
+lancent depuis le dossier `cours`.
+
+```bash
+cd cours && npm run uchi -- run 06-fichiers.uchi
+```
+
+La suite de tests exécute les huit leçons, donc un programme de cours cassé fait
+échouer `npm test`.
+
 ## Développement
 
 ```bash
-npm test           # 92 tests
+npm test           # 107 tests
 npm run typecheck  # tsc --noEmit, mode strict
 ```
 
-Couverture mesurée : **82,9 % des lignes**, 76,6 % des branches, 74,4 % des fonctions.
+Couverture mesurée : **86,8 % des lignes**, 80,7 % des branches, 81,6 % des fonctions.
 
 ## État du projet
 

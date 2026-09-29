@@ -1,0 +1,239 @@
+# Lecon 8 : classes
+#
+# Objectif : regrouper des donnees et les traitements qui les concernent dans
+# un seul objet, et reutiliser du code par heritage.
+# Executer avec : npm run uchi -- run cours/08-classes.uchi
+
+# ------------------------------------------------------------- une classe
+
+# `class` definit un type. `__init__` est appele a la creation : c'est la que
+# l'on range les donnees de l'objet. `self` designe l'objet courant.
+class Compte:
+    def __init__(self, titulaire, solde=0, devise='EUR'):
+        self.titulaire = titulaire
+        self.solde = solde
+        self.devise = devise
+        self.historique = []
+
+    def deposer(self, montant):
+        if montant <= 0:
+            raise ValueError('un depot doit etre positif')
+        self.solde += montant
+        self.historique.append(('depot', montant))
+        return self.solde
+
+    def retirer(self, montant):
+        if montant > self.solde:
+            raise ValueError('solde insuffisant')
+        self.solde -= montant
+        self.historique.append(('retrait', montant))
+        return self.solde
+
+    def deposer_tout(self):
+        # Un generateur : comme une comprehension, mais sans construire de
+        # liste. On le consomme avec `sum`, `max`, `min` ou `for`.
+        total = sum(montant for _, montant in self.historique)
+        self.solde += total
+        return total
+
+compte = Compte('Ada', 100)
+print(compte.deposer(50), compte.retirer(20))
+print(compte.titulaire, compte.solde, compte.historique)
+print(compte.deposer_tout(), compte.solde)
+
+# Chaque objet a sa propre copie des attributs.
+autre = Compte('Grace')
+print(autre.solde, compte.solde)
+
+# Un attribut declare dans `__init__` peut etre modifie apres coup, et on peut
+# en ajouter d'autres a la volee comme en Python.
+compte.devise = 'USD'
+print(compte.devise, autre.devise)
+
+# En revanche, lire un attribut qui n'existe pas leve AttributeError. C'est
+# l'erreur la plus courante sur des objets : une faute de frappe
+# (`self.soldee = 0` au lieu de `self.solde = 0`) se voit immediatement.
+try:
+    print(compte.solde, compte.soldee)
+except AttributeError as erreur:
+    print('lecture impossible :', erreur)
+
+# ------------------------------------------------------------- afficher un objet
+
+# Sans `__repr__`, un objet s'affiche avec son adresse memoire, inutile a
+# lire. `__repr__` est la representation technique, `__str__` la version
+# lisible. `print` utilise `__str__` quand il existe, sinon `__repr__`.
+class Temperature:
+    def __init__(self, degres):
+        self.degres = degres
+
+    def __repr__(self):
+        return f'Temperature({self.degres})'
+
+    def __str__(self):
+        unite = 'C' if self.degres >= -273 else 'K'
+        pluriel = '' if abs(self.degres) == 1 else 's'
+        return f'{self.degres} degre{pluriel} {unite}'
+
+    def __len__(self):
+        return 0 if self.degres < -273 else 1
+
+    # Comparaison et operateurs : `__eq__`, `__lt__` et `__add__` permettent
+    # d'ecrire `a == b` et `a + b` sur ses propres objets.
+    def __eq__(self, autre):
+        return self.degres == autre.degres
+
+    def __lt__(self, autre):
+        return self.degres < autre.degres
+
+    def __add__(self, autre):
+        return Temperature(self.degres + autre.degres)
+
+t = Temperature(20)
+print(t)
+print(repr(t))
+print(str(t))
+print([t, Temperature(-300)])
+print(len(Temperature(-300)), len(t))
+print(Temperature(20) == Temperature(20), Temperature(20) < Temperature(30))
+print(Temperature(10) + Temperature(5))
+
+# Les autres crochets utiles : `__contains__` pour `in`, `__getitem__` pour
+# les crochets, `__call__` pour appeler l'objet comme une fonction.
+class Joueur:
+    def __init__(self, score):
+        self.score = score
+
+    def __call__(self, points):
+        self.score += points
+        return self.score
+
+joueur = Joueur(10)
+print(joueur(5), joueur(5))
+
+# ------------------------------------------------------------- attributs de classe
+
+# Un attribut ecrit dans le corps de la classe est partage par tous les
+# objets de la classe ; un attribut ecrit dans `__init__` avec `self` est
+# propre a chaque objet.
+class Configuration:
+    def __init__(self, nom):
+        self.nom = nom
+
+    def decrire(self):
+        return f'{self.nom} (version {Configuration.version})'
+
+    version = 2      # attribut de classe, partage
+
+print(Configuration('test').decrire())
+print(Configuration.version, Configuration('autre').version)
+# Modifier `Configuration.version` change la valeur pour tout le monde.
+
+# ------------------------------------------------------------- heritage
+
+# Une classe peut heriter d'une autre et ajouter ou redefinir des methodes.
+# `super()` appelle la version de la classe mere.
+class CompteEpargne(Compte):
+    def __init__(self, titulaire, solde=0, taux=0.02):
+        super().__init__(titulaire, solde)
+        self.taux = taux
+        self.interets = 0.0
+
+    def appliquer_interets(self):
+        self.interets = round(self.solde * self.taux, 2)
+        return self.interets
+
+epargne = CompteEpargne('Ada', 1000, 0.03)
+print(epargne.appliquer_interets(), epargne.interets)
+print(epargne.deposer(500), epargne.solde)   # methode heritee
+
+# `isinstance` et `issubclass` repondent a " est-ce de ce type la ? ".
+print(isinstance(epargne, Compte), isinstance(compte, CompteEpargne))
+print(issubclass(CompteEpargne, Compte), issubclass(Compte, CompteEpargne))
+
+# Le nom de la classe sert dans les messages d'erreur et pour le debogage.
+print(type(compte).__name__, type(epargne).__name__)
+
+# ------------------------------------------------------------- plusieurs classes
+
+# Un programme se structure avec des classes qui se connaisse : le compte
+# detient des operations, la banque en cree et sait le totaliser.
+class Operation:
+    def __init__(self, libelle, montant):
+        self.libelle = libelle
+        self.montant = montant
+
+    def __repr__(self):
+        return f'{self.libelle} {self.montant:+.2f}'
+
+class Banque:
+    def __init__(self, nom):
+        self.nom = nom
+        self.comptes = []
+
+    def ouvrir(self, titulaire, solde=0):
+        compte = Compte(titulaire, solde)
+        self.comptes.append(compte)
+        return compte
+
+    def total(self):
+        return round(sum(c.solde for c in self.comptes), 2)
+
+    def __str__(self):
+        return f'{self.nom} : {len(self.comptes)} compte(s), {self.total():.2f} EUR'
+
+banque = Banque('Banque de France')
+banque.ouvrir('Ada', 1000)
+banque.ouvrir('Grace', 500)
+print(banque)
+print(banque.total(), len(banque.comptes))
+for c in banque.comptes:
+    print(' ', c.titulaire, c.solde)
+
+# ------------------------------------------------------------- exercices
+
+# Exercice 1 : ecrivez une classe `Rectangle` avec une largeur et une hauteur,
+# des methodes `aire()` et `perimetre()`, et un `__repr__`. Verifiez que
+# modifier la largeur ne touche pas l'autre rectangle.
+# Correction :
+#   class Rectangle:
+#       def __init__(self, largeur, hauteur):
+#           self.largeur = largeur
+#           self.hauteur = hauteur
+#       def aire(self):
+#           return self.largeur * self.hauteur
+#       def perimetre(self):
+#           return 2 * (self.largeur + self.hauteur)
+#       def __repr__(self):
+#           return f'Rectangle({self.largeur}x{self.hauteur})'
+#   r = Rectangle(3, 4)
+#   print(r, r.aire(), r.perimetre())
+
+# Exercice 2 : ecrivez une classe `Pile` (une pile, dernier arrive premier
+# servi) avec `empiler`, `depiler` et `vide`, en levant `IndexError` quand on
+# depile une pile vide. Indice : une liste et `pop` font toute l'affaire.
+# Correction :
+#   class Pile:
+#       def __init__(self):
+#           self.elements = []
+#       def empiler(self, x):
+#           self.elements.append(x)
+#       def depiler(self):
+#           if not self.elements:
+#               raise IndexError('pile vide')
+#           return self.elements.pop()
+#       def vide(self):
+#           return not self.elements
+#   p = Pile()
+#   p.empiler(1)
+#   p.empiler(2)
+#   print(p.depiler(), p.vide())
+
+# Exercice 3 : ecrivez `CompteEpargne.__str__` pour que l'affichage soit
+# lisible seul. `Compte` n'a pas de `__str__`, expliquez pourquoi appeler
+# `super().__str__()` ne marcherait pas ici.
+# Correction :
+#   def __str__(self):
+#       return f'{self.titulaire} : {self.solde} {self.devise} (taux {self.taux:.1%})'
+#   # `super().__str__()` chercherait une methode `__str__` dans `Compte` et
+#   # `Banque`, qui n'en ont pas : AttributeError.

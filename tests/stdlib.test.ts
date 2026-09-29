@@ -76,6 +76,21 @@ test('`open` lit et ecrit un fichier texte', () => {
   );
 });
 
+test('un fichier se parcourt ligne par ligne', () => {
+  const data = join(workspace(), 'lignes.txt').replaceAll('\\', '/');
+  writeFileSync(data, 'un\ndeux\n');
+  // `for ligne in f` equivaut a `readlines()`, l'iteration etant immediate.
+  assert.equal(run(`for ligne in open("${data}"):\n    print(repr(ligne))\n`), "'un\\n'\n'deux\\n'\n");
+  assert.equal(
+    run(`with open("${data}") as f:\n    for i, ligne in enumerate(f, 1):\n        print(i, ligne.strip())\n`),
+    '1 un\n2 deux\n',
+  );
+  // Un fichier ecrit se relit de la meme facon.
+  const out = join(workspace(), 'itineraire.txt').replaceAll('\\', '/');
+  run(`with open("${out}", 'w') as f:\n    f.write("a\\nb\\n")\n`);
+  assert.equal(run(`print([l.strip() for l in open("${out}")])\n`), "['a', 'b']\n");
+});
+
 test('un fichier s\'ecrit et se relit', () => {
   const dir = workspace();
   const out = join(dir, 'sortie.txt').replaceAll('\\', '/');

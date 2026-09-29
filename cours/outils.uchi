@@ -1,0 +1,40 @@
+# Module partage par la lecon 7.
+#
+# Un module `.uchi` est un script qui expose des definitions : fonctions,
+# constantes, classes. Il n'est execute que ce qu'il contient, pas ce qu'il
+# ecrit. Les `print` de demonstration vivent dans la lecon, pas ici.
+
+# Constantes : un module sert aussi a regrouper des valeurs nommees.
+TAUX_TVA = 0.20
+SEUIL_FRANCO_DE_PORT = 50.0
+
+
+def ttc(ht):
+    """Prix toutes taxes comprises, arrondi au centime."""
+    return round(ht * (1 + TAUX_TVA), 2)
+
+
+def port(ht):
+    """Frais de port : gratuit au-dessus du seuil, sinon 5,90 euros."""
+    if ht >= SEUIL_FRANCO_DE_PORT:
+        return 0.0
+    return 5.90
+
+
+def commander(ht, quantite=1):
+    """Rend un recapitulatif de commande sous forme de dictionnaire."""
+    total_ht = round(ht * quantite, 2)
+    frais = port(total_ht) if quantite >= 1 else 0.0
+    return {
+        'ht': total_ht,
+        'port': frais,
+        'ttc': round(total_ht + frais, 2),
+    }
+
+
+def resume(panier):
+    """Calcule le recapitulatif d'un panier : liste de (prix, quantite)."""
+    ht = 0.0
+    for prix, quantite in panier:
+        ht += prix * quantite
+    return commander(ht)
