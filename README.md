@@ -42,6 +42,27 @@ exécution depuis le navigateur (`Ctrl+Entrée`), analyse sans exécution, diagn
 d'appels. Chaque exécution tourne dans un *worker* isolé, avec un délai maximal de 10 s par
 défaut (`--timeout S`) : une boucle infinie immobilise le programme, jamais l'éditeur.
 
+## Délais d'exécution
+
+`run` et `repl` bornent eux aussi l'exécution, avec la même limite de 10 s :
+
+```bash
+node ./bin/uchi.mjs run lent.uchi --timeout 30   # 30 s au lieu de 10
+node ./bin/uchi.mjs repl --timeout 2            # 2 s par instruction saisie
+```
+
+- `run` exécute le script dans un *worker* dédié. Le délai atteint, le programme est arrêté
+  avec un `TimeoutError` ; le terminal, lui, ne peut pas se retrouver bloqué.
+- `repl` ne peut pas employer de *worker* — la session perdrait son état entre les lignes.
+  Chaque instruction est donc bornée depuis l'intérieur des boucles, et la session survit à
+  une instruction interrompue. Une expression qui ne rend pas la main, comme une
+  expression régulière maladroite, n'est en revanche pas interrompue.
+- Au `repl`, une instruction qui ouvre un bloc (`def`, `if`, …) se saisit jusqu'à la ligne
+  vide, qui clôture et exécute la saisie.
+- `--no-timeout` rend le terminal au script : `input()` fonctionne, mais plus rien n'est protégé.
+- Un `--` sépare les options d'Uchi des arguments du script :
+  `node ./bin/uchi.mjs run jeu.uchi -- --timeout` transmet `--timeout` au script.
+
 ## Exemple
 
 ```uchi
@@ -63,11 +84,11 @@ expressions régulières et JSON.
 ## Développement
 
 ```bash
-npm test           # 54 tests
+npm test           # 84 tests
 npm run typecheck  # tsc --noEmit, mode strict
 ```
 
-Couverture mesurée : **81,5 % des lignes**, 76,0 % des branches, 73,6 % des fonctions.
+Couverture mesurée : **81,8 % des lignes**, 76,3 % des branches, 74,1 % des fonctions.
 
 ## État du projet
 

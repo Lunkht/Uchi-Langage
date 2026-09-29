@@ -10,6 +10,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { runIsolated } from './execution/isolated.ts';
 import { UchiThrow, UchiSyntaxError } from './errors.ts';
 import { defaultRoot, openBrowser, openEditor } from './gui/index.ts';
 import { Interpreter } from './interpreter/interpreter.ts';
@@ -19,38 +20,128 @@ import { UchiError } from './interpreter/values.ts';
 import { parse } from './parser/parser.ts';
 import { UCHI_VERSION } from './stdlib/version.ts';
 
+/** Duree max d'une execution, en secondes, si `--timeout` n'est pas precise. */
+const DEFAULT_TIMEOUT = 10;
+
+/**
+ * Options qui appartiennent a l'editeur, avec le nombre de valeurs qu'elles
+ * consomment.
+ *
+ * `run` et `repl` les recoivent sans les connaitre : elles sont transmises a
+ * l'appelant, qui les interprete ou les refuse.
+ */
+const DELEGATED_OPTIONS: Readonly<Record<string, number>> = {
+  '--port': 1,
+  '--no-open': 0,
+};
+
 const USAGE = `Uchi ${UCHI_VERSION}
 
 Utilisation :
   uchi run <fichier${EXTENSION}> [arguments...]   execute un script
-  uchi repl                                ouvre l'interpreteur interactif
+                                       --timeout S   duree max d'une execution (${DEFAULT_TIMEOUT} s)
+                                       --no-timeout  execute sans limite de temps ni fil dedie
+  uchi repl                            ouvre l'interpreteur interactif
+                                       --timeout S   duree max d'une instruction saisie (${DEFAULT_TIMEOUT} s)
   uchi check <fichier${EXTENSION}>                analyse le fichier sans l'executer
   uchi gui [dossier] [options]        ouvre l'editeur web
-                                      --port N      port d'ecoute
-                                      --timeout S   duree max d'une execution (10 s)
-                                      --no-open     n'ouvre pas le navigateur
+                                       --port N      port d'ecoute
+                                       --timeout S   duree max d'une execution (${DEFAULT_TIMEOUT} s)
+                                       --no-open     n'ouvre pas le navigateur
   uchi -e "<code>"                         execute un fragment de code
   uchi version                             affiche la version
   uchi help                                affiche cette aide
+
+'run' execute le script dans un fil dedie : --timeout peut donc etre place
+avant ou apres le fichier. Ce qui suit le fichier apartient au script, sauf si
+un '--' le separe des options d'Uchi :
+
+  uchi run jeu${EXTENSION} --timeout 5     limite l'execution a 5 s
+  uchi run jeu${EXTENSION} -- --timeout    le script recoit '--timeout'
 `;
+
+/** Options communes a `run` et `repl`. */
+interface ExecutionOptions {
+  /** Delai maximal, en millisecondes ; `0` signifie aucune limite. */
+  timeoutMs: number;
+  /** `true` pour `--no-timeout` : execution dans le fil appelant. */
+  withoutTimeout: boolean;
+}
+
+function defaultExecutionOptions(): ExecutionOptions {
+  return { timeoutMs: DEFAULT_TIMEOUT * 1000, withoutTimeout: false };
+}
+
+/**
+ * Lit les options d'execution communes a `run`, `repl` et `gui`.
+ *
+ * `--timeout` et `--no-timeout` sont consommees ici ; les options de l'editeur
+ * sont transmises telles quelles a l'appelant, qui les interprete ou les
+ * refuse. Toute autre option inconnue est signalee.
+ *
+ * @param scriptEnd `true` pour `run` : le fichier du script arrete la lecture
+ *   des options dites du script, car tout ce qui suit lui appartient, y compris
+ *   des arguments comme `-v` qu'Uchi ne connait pas. `--timeout` et
+ *   `--no-timeout` font exception : ce sont des regles d'execution, pas des
+ *   arguments du script.
+ *
+ * Un `--` isole les arguments du script : apres lui, plus rien n'est lu comme
+ * une option, ce qui permet de transmettre `--timeout` a un script.
+ */
+function readExecutionOptions(
+  args: string[],
+  scriptEnd = false,
+): { options: ExecutionOptions; rest: string[] } | { error: string } {
+  const options = defaultExecutionOptions();
+  const rest: string[] = [];
+  const separator = args.indexOf('--');
+  const head = separator === -1 ? args : args.slice(0, separator);
+  const tail = separator === -1 ? [] : args.slice(separator + 1);
+  // Passe a vrai des que le fichier du script a ete lu.
+  let scriptArgs = false;
+
+  for (let i = 0; i < head.length; i++) {
+    const arg = head[i] as string;
+    // `--timeout` et `--no-timeout` restent des options d'Uchi meme apres le
+    // nom du fichier : c'est la forme naturelle, `run jeu.uchi --timeout 5`.
+    if (arg === '--timeout') {
+      const secondes = Number(head[++i]);
+      if (!Number.isFinite(secondes) || secondes <= 0) {
+        return { error: 'Erreur : --timeout attend un nombre de secondes positif.\n' };
+      }
+      options.timeoutMs = secondes * 1000;
+    } else if (arg === '--no-timeout') {
+      options.withoutTimeout = true;
+    } else if (scriptArgs) {
+      // Le fichier du script est lu : tout le reste lui appartient.
+      rest.push(arg);
+    } else if (arg.startsWith('-') && arg !== '-') {
+      const values = DELEGATED_OPTIONS[arg];
+      if (values === undefined) return { error: `Option inconnue : '${arg}'\n` };
+      rest.push(arg, ...head.slice(i + 1, i + 1 + values));
+      i += values;
+    } else {
+      rest.push(arg);
+      scriptArgs = scriptEnd;
+    }
+  }
+  rest.push(...tail);
+  return { options, rest };
+}
 
 export function main(argv: string[]): number {
   const [command = 'help', ...rest] = argv;
 
   switch (command) {
     case 'run':
-      return runCommand(rest);
+      return launch(runCommand(rest));
     case 'repl':
-      return replCommand(rest);
+      return launch(replCommand(rest));
     case 'check':
       return checkCommand(rest);
     case 'gui':
-      // Le demarrage du serveur est asynchrone : le code de sortie est fourni
-      // plus tard, quand l'editeur s'arrete.
-      void guiCommand(rest).then((code) => {
-        process.exitCode = code;
-      });
-      return 0;    case '-e':
+      return launch(guiCommand(rest));
+    case '-e':
       return evalCommand(rest);
     case 'version':
     case '--version':
@@ -64,15 +155,50 @@ export function main(argv: string[]): number {
       return 0;
     default:
       // `uchi fichier.uchi` equivaut a `uchi run fichier.uchi`.
-      if (command.endsWith(EXTENSION)) return runCommand(argv);
+      if (command.endsWith(EXTENSION)) return launch(runCommand(argv));
       process.stderr.write(`Commande inconnue : '${command}'\n\n${USAGE}`);
       return 2;
   }
 }
 
-/** Execute un script. Les arguments du script sont exposes par `sys.argv`. */
-function runCommand(args: string[]): number {
-  const [file, ...scriptArgs] = args;
+/**
+ * Lance une commande asynchrone et rend la main.
+ *
+ * Le code de sortie est fourni plus tard, quand la commande se termine ; tant
+ * qu'elle tourne, c'est la boucle d'evenements qui tient le processus.
+ */
+function launch(action: Promise<number>): number {
+  void action.then(
+    (code) => {
+      process.exitCode = code;
+    },
+    // Une commande qui echoue ne doit pas se perdre en rejet sans trace.
+    (erreur: unknown) => {
+      const message = erreur instanceof Error ? erreur.message : String(erreur);
+      process.stderr.write(`Erreur interne : ${message}\n`);
+      process.exitCode = 70;
+    },
+  );
+  return 0;
+}
+
+/**
+ * Execute un script.
+ *
+ * Par defaut le programme tourne dans un fil dedie : un delai atteint, ou un
+ * programme qui plante l'hote, n'interrompt que lui. `sys.argv` est transmis au
+ * fil, qui n'a pas le terminal : `input()` atteint donc la fin du flux.
+ * `--no-timeout` rend la main au programme pour un script qui a besoin de lire
+ * l'entree standard, au prix de toute protection.
+ */
+async function runCommand(args: string[]): Promise<number> {
+  const parsed = readExecutionOptions(args, true);
+  if ('error' in parsed) {
+    process.stderr.write(parsed.error);
+    return 2;
+  }
+  const { options, rest } = parsed;
+  const [file, ...scriptArgs] = rest;
   if (file === undefined) {
     process.stderr.write("Erreur : aucun fichier indique.\n\n" + USAGE);
     return 2;
@@ -83,14 +209,27 @@ function runCommand(args: string[]): number {
     return 2;
   }
 
-  const interpreter = new Interpreter({
-    argv: [path, ...scriptArgs],
-    baseDirectory: dirname(path),
-  });
+  if (options.withoutTimeout) return runInProcess(path, scriptArgs);
 
+  const result = await runIsolated({ path, argv: [path, ...scriptArgs], stream: true }, options.timeoutMs, (chunk) => {
+    process.stdout.write(chunk);
+  });
+  if (result.error !== null) {
+    // `sys.exit(n)` se presente comme une exception, mais ce n'en est pas une :
+    // le code demande fait foi et rien ne doit etre signale a l'utilisateur.
+    if (result.exitCode !== undefined) return result.exitCode;
+    process.stderr.write(`${result.error.name} : ${result.error.message}\n`);
+    for (const frame of result.trace) process.stderr.write(`${frame}\n`);
+    return 1;
+  }
+  return result.exitCode ?? 0;
+}
+
+/** Execute le script dans le fil appelant, sans limite de temps. */
+function runInProcess(path: string, scriptArgs: string[]): number {
+  const interpreter = new Interpreter({ argv: [path, ...scriptArgs], baseDirectory: dirname(path) });
   try {
-    const program = parse(readFileSync(path, 'utf8'), path);
-    interpreter.run(program);
+    interpreter.run(parse(readFileSync(path, 'utf8'), path));
     return 0;
   } catch (thrown) {
     return reportError(interpreter, thrown, path);
@@ -127,31 +266,30 @@ function checkCommand(args: string[]): number {
  * Le processus reste vivant jusqu'a l'arret du serveur par Ctrl+C.
  */
 async function guiCommand(args: string[]): Promise<number> {
-  const options = { root: defaultRoot(), port: 0, open: true, runTimeout: 10 };
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i] as string;
+  const parsed = readExecutionOptions(args);
+  if ('error' in parsed) {
+    process.stderr.write(parsed.error);
+    return 2;
+  }
+  const options = { root: defaultRoot(), port: 0, open: true, runTimeout: parsed.options.timeoutMs / 1000 };
+  for (let i = 0; i < parsed.rest.length; i++) {
+    const arg = parsed.rest[i] as string;
     if (arg === '--port') {
-      const port = Number(args[++i]);
+      const port = Number(parsed.rest[++i]);
       if (!Number.isInteger(port) || port < 0 || port > 65535) {
         process.stderr.write('Erreur : --port attend un numero de port valide.\n');
         return 2;
       }
       options.port = port;
-    } else if (arg === '--timeout') {
-      const secondes = Number(args[++i]);
-      if (!Number.isFinite(secondes) || secondes <= 0) {
-        process.stderr.write('Erreur : --timeout attend un nombre de secondes positif.\n');
-        return 2;
-      }
-      options.runTimeout = secondes;
     } else if (arg === '--no-open') {
       options.open = false;
-    } else if (arg.startsWith('-')) {
-      process.stderr.write(`Option inconnue : '${arg}'\n`);
-      return 2;
     } else {
       options.root = resolve(arg);
     }
+  }
+  if (parsed.options.withoutTimeout) {
+    process.stderr.write('Erreur : --no-timeout n\'a pas de sens pour un editeur.\n');
+    return 2;
   }
   if (!existsSync(options.root)) {
     process.stderr.write(`Erreur : dossier introuvable : '${options.root}'\n`);
@@ -196,13 +334,35 @@ function evalCommand(args: string[]): number {
 }
 
 /**
- * Interpreteur interactif. Les instructions incompletes (`def`, `if`, ...)
- * attendent la ligne suivante ; une ligne vide ou `:` clot le bloc.
+ * Interpreteur interactif.
+ *
+ * Une instruction qui ouvre un bloc (`def`, `if`, ...) attend la ligne suivante ;
+ * la ligne vide clot la saisie et declenche l'execution. L'etat de la session
+ * est conserve d'une ligne a l'autre, ce qui exclut un fil dedie : c'est
+ * pourquoi chaque instruction est bornee par `deadlineMs` plutot que par une
+ * coupure du fil, qui interromprait la session.
  */
-function replCommand(args: string[]): number {
-  const interpreter = new Interpreter({ argv: ['repl', ...args] });
+function replCommand(args: string[]): Promise<number> {
+  const parsed = readExecutionOptions(args);
+  if ('error' in parsed) {
+    process.stderr.write(parsed.error);
+    return Promise.resolve(2);
+  }
+  const interpreter = new Interpreter({ argv: ['repl', ...parsed.rest], deadlineMs: parsed.options.timeoutMs });
   let pending = '';
   let depth = 0;
+
+  /** Execute la saisie en cours et rend la main a l'invite. */
+  function executer(source: string): void {
+    pending = '';
+    depth = 0;
+    try {
+      const value = interpreter.runSource(source, '<repl>');
+      if (value !== null) process.stdout.write(`${interpreter.toInspectString(value)}\n`);
+    } catch (thrown) {
+      reportReplError(interpreter, thrown);
+    }
+  }
 
   process.stdout.write(`Uchi ${UCHI_VERSION} — tapez 'exit()' pour quitter.\n`);
 
@@ -213,43 +373,38 @@ function replCommand(args: string[]): number {
 
     const trimmed = line.trim();
     if (depth === 0 && (trimmed === 'exit()' || trimmed === 'quit()')) break;
+    // La ligne vide clot une saisie en cours ; au repos, elle est ignoree.
     if (trimmed === '') {
-      pending = '';
-      depth = 0;
+      if (depth > 0) executer(pending);
       continue;
     }
 
-    const source = pending === '' ? line : `${pending}\n${line}`;
-    pending = source;
-    depth = measureDepth(source);
+    pending = pending === '' ? line : `${pending}\n${line}`;
+    depth = measureDepth(pending);
     if (depth > 0) continue;
-
-    try {
-      const value = interpreter.runSource(source, '<repl>');
-      if (value !== null) process.stdout.write(`${interpreter.toInspectString(value)}\n`);
-    } catch (thrown) {
-      reportReplError(interpreter, thrown);
-    }
-    pending = '';
+    executer(pending);
   }
   process.stdout.write('A bientot.\n');
-  return 0;
+  return Promise.resolve(0);
 }
 
-/** Profondeur d'indentation approximative, suffisante pour la saisie en direct. */
+/**
+ * Nombre de blocs encore ouverts dans une saisie en cours.
+ *
+ * Le compte ne sert qu'a savoir si une saisie est encore incomplete. Une ligne
+ * qui ouvre un bloc (`if x:`) l'incremente ; une ligne comme `else:` referme un
+ * bloc et en ouvre un autre, donc ne change rien. Aucune autre ligne n'y touche :
+ * la ligne vide, et non le dedent, clot la saisie.
+ */
 function measureDepth(source: string): number {
-  const lines = source.split('\n');
   let depth = 0;
-  for (const [index, line] of lines.entries()) {
+  for (const line of source.split('\n')) {
     if (line.trim() === '') continue;
-    const isLast = index === lines.length - 1;
     const opensBlock = /:\s*(#.*)?$/.test(line);
-    const closesBlock = /^\s*(else|elif|except|finally|except\s)/.test(line);
-    const lowers = /^\s*(return|pass|break|continue)\b/.test(line);
-    if (lowers || (closesBlock && depth > 0)) {
-      depth = Math.max(0, depth - 1);
-    }
-    if (opensBlock && !closesBlock && !lowers) depth++;
+    // `else:`, `elif x:`, `except E:`, `finally:` : un bloc se ferme, un autre
+    // s'ouvre, la profondeur reste la meme.
+    const closesBlock = /^\s*(else|elif|except|finally)\b/.test(line);
+    if (opensBlock && !closesBlock) depth++;
   }
   return depth;
 }

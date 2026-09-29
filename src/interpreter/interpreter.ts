@@ -108,6 +108,12 @@ type Signal = BreakSignal | ContinueSignal | ReturnSignal;
 const BREAK = new BreakSignal();
 const CONTINUE = new ContinueSignal();
 
+/**
+ * Masque du controle du delai : l'horloge n'est lue qu'un tour sur 4096, pour
+ * que la garde reste negligeable devant le cout d'un tour de boucle.
+ */
+const DEADLINE_MASK = 0xfff;
+
 /** Pile d'appels : sert a `super()` et aux traces d'appels. */
 interface Frame {
   name: string;
@@ -134,6 +140,12 @@ export interface InterpreterOptions {
   maxCallDepth?: number;
   /** Nombre d'iterations maximal par boucle : garde-fou contre `while True`. */
   maxLoopIterations?: number;
+  /**
+   * Delai maximal d'une evaluation, en millisecondes ; `0` signifie aucun
+   * delai. Utilise par l'interpreteur interactif, ou un fil dedie ne peut pas
+   * interrompre le programme sans perdre l'etat de la session.
+   */
+  deadlineMs?: number;
 }
 
 export class Interpreter implements HostContext {
@@ -152,10 +164,19 @@ export class Interpreter implements HostContext {
   /** Ligne de la derniere instruction du niveau module : origine de la trace. */
   private moduleLine = 0;
 
+  /**
+   * Instant limite de l'evaluation en cours, en millisecondes ; `0` si
+   * l'execution n'est pas bornee dans le temps. Reglable entre deux
+   * evaluations, ce qui permet a l'interpreteur interactif de borner chaque
+   * instruction saisie sans perdre l'etat de la session.
+   */
+  deadline = 0;
+
   private readonly writeFn: (text: string) => void;
   private readonly readLineFn: () => string | null;
   private readonly maxCallDepth: number;
   private readonly maxLoopIterations: number;
+  private readonly defaultDeadlineMs: number;
 
   constructor(options: InterpreterOptions = {}) {
     this.writeFn = options.write ?? ((text: string) => process.stdout.write(text));
@@ -163,6 +184,8 @@ export class Interpreter implements HostContext {
     this.argv = options.argv ?? [];
     this.maxCallDepth = options.maxCallDepth ?? 2000;
     this.maxLoopIterations = options.maxLoopIterations ?? 10_000_000;
+    this.defaultDeadlineMs = options.deadlineMs ?? 0;
+    this.armDeadline();
 
     this.builtinsEnv = new Environment(null, false);
     this.globalEnv = new Environment(this.builtinsEnv, true);
@@ -206,7 +229,15 @@ export class Interpreter implements HostContext {
   /** Analyse puis execute une source (REPL, option `-e`). */
   runSource(source: string, path = '<repl>'): UchiValue {
     const program = parse(source, path);
+    // Chaque instruction saisie est un programme distinct : le delai repart de
+    // zero, sans quoi la session deviendrait inutilisable apres quelques lignes.
+    this.armDeadline();
     return this.withThrowBoundary(() => this.execStatementsForResult(program.body, this.globalEnv));
+  }
+
+  /** Place l'instant limite a `defaultDeadlineMs` a partir de maintenant. */
+  private armDeadline(): void {
+    this.deadline = this.defaultDeadlineMs === 0 ? 0 : Date.now() + this.defaultDeadlineMs;
   }
 
   /**
@@ -405,6 +436,7 @@ export class Interpreter implements HostContext {
           ),
         );
       }
+      this.checkDeadline(iterations, 'while');
       const signal = this.execBlock(statement.body, env);
       if (signal === null || signal instanceof ContinueSignal) continue;
       if (signal instanceof BreakSignal) {
@@ -415,6 +447,24 @@ export class Interpreter implements HostContext {
     }
     if (completed && statement.orelse !== null) return this.execBlock(statement.orelse, env);
     return null;
+  }
+
+  /**
+   * Verifie que le delai de l'evaluation en cours n'est pas depasse.
+   *
+   * L'horloge n'est lue qu'un tour sur `DEADLINE_MASK + 1` : une boucle doit
+   * rester aussi rapide que possible, et le delai n'a pas besoin d'une precision
+   * meilleure que quelques milliers de tours.
+   */
+  private checkDeadline(iterations: number, boucle: string): void {
+    if (this.deadline === 0 || (iterations & DEADLINE_MASK) !== 0) return;
+    if (Date.now() <= this.deadline) return;
+    throwValue(
+      makeError(
+        'TimeoutError',
+        `delai depasse pendant une boucle '${boucle}' : execution interrompue`,
+      ),
+    );
   }
 
   private execFor(statement: Extract<Stmt, { kind: 'for' }>, env: Environment): Signal | null {
@@ -432,6 +482,7 @@ export class Interpreter implements HostContext {
           ),
         );
       }
+      this.checkDeadline(iterations, 'for');
       this.assign(statement.target, item, env);
       const signal = this.execBlock(statement.body, env);
       if (signal === null || signal instanceof ContinueSignal) continue;

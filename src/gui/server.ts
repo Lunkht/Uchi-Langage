@@ -14,12 +14,12 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Worker } from 'node:worker_threads';
 import { UchiSyntaxError } from '../errors.ts';
+import { runIsolated } from '../execution/isolated.ts';
+import type { RunRequest, RunResult } from '../execution/protocol.ts';
 import { EXTENSION, LANGUAGE } from '../language.ts';
 import { parse } from '../parser/parser.ts';
 import { collectGrammar, type Grammar } from './grammar.ts';
-import type { RunRequest, RunResult } from './protocol.ts';
 
 const ASSET_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'assets');
 const PROJECT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -303,67 +303,6 @@ function check(path: string, text: string | undefined): CheckResult {
       return { ok: false, error: { message: error.message, line: error.line, column: error.column } };
     }
     return { ok: false, error: { message: message(error), line: 1, column: 0 } };
-  }
-}
-
-/**
- * Execute un programme dans un fil dedie, et coupe au bout de `timeout`.
- *
- * Le fil se termine toujours : une boucle infinie immobilise le programme, pas
- * l'editeur, et le serveur reste disponible pour enregistrer le fichier. La
- * sortie deja ecrite par un programme interrompu est perdue : le fil ne la
- * rend pas en arretant le programme.
- */
-async function runIsolated(request: RunRequest, timeout: number): Promise<RunResult> {
-  const worker = new Worker(new URL('./runner.ts', import.meta.url), { workerData: request });
-  try {
-    return await new Promise<RunResult>((resolvePromise) => {
-      let repondu = false;
-      const minuteur = setTimeout(() => {
-        repondre({
-          ok: false,
-          stdout: '',
-          trace: [],
-          error: {
-            name: 'TimeoutError',
-            message: `delai depasse (${Math.round(timeout / 1000)} s) : execution interrompue`,
-            line: 0,
-          },
-          durationMs: timeout,
-        });
-      }, timeout);
-
-      function repondre(result: RunResult): void {
-        if (repondu) return;
-        repondu = true;
-        clearTimeout(minuteur);
-        resolvePromise(result);
-      }
-
-      worker.on('message', repondre);
-      // Un plantage du programme (pile profunda, memoire) est rattrape ici.
-      worker.on('error', (erreur: Error) => {
-        repondre({
-          ok: false,
-          stdout: '',
-          trace: [],
-          error: { name: 'RuntimeError', message: erreur.message, line: 0 },
-          durationMs: 0,
-        });
-      });
-      // Un fil qui s'arrete sans avoir repondu a ete arrete par le systeme.
-      worker.on('exit', (code: number) => {
-        repondre({
-          ok: false,
-          stdout: '',
-          trace: [],
-          error: { name: 'RuntimeError', message: `le programme s'est arrete (code ${code})`, line: 0 },
-          durationMs: 0,
-        });
-      });
-    });
-  } finally {
-    await worker.terminate();
   }
 }
 

@@ -1,9 +1,9 @@
 /**
- * Fil d'execution du programme lance par l'editeur.
+ * Fil d'execution d'un programme Uchi.
  *
- * L'execution se fait ici, dans un fil dedie plutot que dans le fil du
- * serveur : une boucle infinie ou un depilement de pile ne peut donc plus
- * immobiliser l'editeur, et le serveur peut interrompre le programme quand la
+ * L'execution se fait ici, dans un fil dedie plutot que dans le fil de
+ * l'appelant : une boucle infinie ou un depilement de pile ne peut donc plus
+ * immobiliser l'editeur, et l'appelant peut interrompre le programme quand la
  * limite de temps est atteinte. Le fil renvoie un `RunResult` et se termine.
  */
 
@@ -14,13 +14,14 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { UchiSyntaxError, UchiThrow, tracebackLine } from '../errors.ts';
 import { Interpreter } from '../interpreter/interpreter.ts';
 import { errorSummary } from '../interpreter/report.ts';
+import { UchiError } from '../interpreter/values.ts';
 import { parse } from '../parser/parser.ts';
-import type { RunRequest, RunResult } from './protocol.ts';
+import type { OutputChunk, RunRequest, RunResult } from './protocol.ts';
 
 /**
  * Taille maximale de la sortie conservee.
  *
- * Un programme peut ecrire indefiniment ; sans plafond, la page recoit un
+ * Un programme peut ecrire indefiniment ; sans plafond, l'appelant recoit un
  * message geant. Au-dela, l'ecriture est ignoree et la sortie est annoncee
  * comme tronquee.
  */
@@ -43,25 +44,29 @@ function run(request: RunRequest): RunResult {
     return echec({ name: 'Error', message: error instanceof Error ? error.message : String(error), line: 0 });
   }
 
+  const argv = request.argv ?? [request.path];
   let stdout = '';
   let tronque = false;
-  const interpreter = new Interpreter({
-    argv: [request.path],
-    baseDirectory: dirname(request.path),
-    write: (chunk) => {
-      if (tronque) return;
-      if (stdout.length + chunk.length <= MAX_OUTPUT) {
-        stdout += chunk;
-        return;
-      }
+  const ecrire = (chunk: string): void => {
+    if (tronque) return;
+    if (stdout.length + chunk.length <= MAX_OUTPUT) {
+      stdout += chunk;
+    } else {
       // Seule la part du fragment qui tient encore est conservee, pour ne pas
       // depasser le plafond.
       stdout += chunk.slice(0, MAX_OUTPUT - stdout.length);
       tronque = true;
       stdout += '\n[sortie tronquee : plus de 1 Mo]';
-    },
+    }
+    if (request.stream) parentPort?.postMessage({ kind: 'sortie', chunk } satisfies OutputChunk);
+  };
+
+  const interpreter = new Interpreter({
+    argv,
+    baseDirectory: dirname(request.path),
+    write: ecrire,
     // Le programme n'a pas de terminal : `input()` atteint immediatement la fin
-    // du flux plutot que de bloquer le serveur.
+    // du flux plutot que de bloquer l'appelant.
     readLine: () => null,
   });
 
@@ -78,7 +83,7 @@ function run(request: RunRequest): RunResult {
   } catch (thrown) {
     const { name, message } = errorSummary(interpreter, thrown);
     const trace = thrown instanceof UchiThrow ? thrown.traceback : [];
-    return {
+    const result: RunResult = {
       ok: false,
       stdout,
       trace,
@@ -87,12 +92,26 @@ function run(request: RunRequest): RunResult {
       error: { name: name === '' ? 'Erreur' : name, message, line: tracebackLine(trace) || interpreter.currentLine },
       durationMs: Math.round(performance.now() - started),
     };
+    // `sys.exit()` demande un code de sortie precis, que l'appelant doit
+    // pouvoir retrouver : il ne se deduit pas du message d'erreur.
+    const code = exitCodeOf(thrown);
+    if (code !== null) result.exitCode = code;
+    return result;
   }
+}
+
+/** Code demande par `sys.exit()`, ou `null` si l'exception n'en est pas une. */
+function exitCodeOf(thrown: unknown): number | null {
+  if (!(thrown instanceof UchiThrow)) return null;
+  const value = thrown.value;
+  if (!(value instanceof UchiError) || value.name !== 'SystemExit') return null;
+  const code = value.args[0];
+  return typeof code === 'number' ? code : 0;
 }
 
 function echec(error: RunResult['error']): RunResult {
   return { ok: false, stdout: '', trace: [], error, durationMs: 0 };
 }
 
-// Le fil n'attend qu'une requete : il repond puis rend la main au serveur.
+// Le fil n'attend qu'une requete : il repond puis rend la main.
 parentPort?.postMessage(run(workerData as RunRequest));
