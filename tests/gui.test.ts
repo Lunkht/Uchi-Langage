@@ -92,17 +92,35 @@ test('l\'editeur sert sa page et ses ressources', async () => {
       assert.equal(response.status, 200, `${asset} doit etre servi`);
       assert.match(response.headers.get('content-type') ?? '', /text|javascript/);
     }
-    // La page montre le logo du projet, pas un texte seul.
+    // Le logo est ecrit dans la page : l'editeur ne demande aucune image.
     const page = await (await fetch(client.server.url.replace(/\/$/, '') + '/')).text();
-    assert.match(page, /<img class="logo" src="\/icon\.svg"/);
-    // L'icone vient de la racine du projet, pas du dossier des ressources.
-    const icone = await fetch(client.server.url.replace(/\/$/, '') + '/icon.svg');
-    assert.equal(icone.status, 200, 'l\'icone du projet doit etre servie');
-    assert.equal(icone.headers.get('content-type'), 'image/svg+xml');
-    assert.equal(await icone.text(), readFileSync(join(PROJECT, 'logo_uchi.svg'), 'utf8'));
-    const touche = await fetch(client.server.url.replace(/\/$/, '') + '/apple-touch-icon.png');
-    assert.equal(touche.status, 200, 'l\'icone tactile doit etre servie');
-    assert.equal(touche.headers.get('content-type'), 'image/png');
+    assert.match(page, /<svg class="logo" viewBox="0 0 75 74"/);
+    assert.match(page, /<link rel="icon" type="image\/svg\+xml" href="data:image\/svg\+xml,/);
+    assert.match(page, /<link rel="apple-touch-icon" href="data:image\/png;base64,/);
+    // Le SVG in-line et le favicon doivent venir du meme logo, trait pour
+    // trait, couleur comprise : le fichier de la page peut deriver du source
+    // sans qu'aucun test ne le voie autrement.
+    const source = readFileSync(join(PROJECT, 'logo_uchi.svg'), 'utf8');
+    const couleurs = new Map(
+      [...source.matchAll(/\.(cls-\d)\s*\{\s*fill:\s*(#[0-9a-fA-F]{3,6})/g)].map(([, c, f]) => [c, f]),
+    );
+    const tracés = [...source.matchAll(/<path class="(cls-\d)" d="([^"]+)"/g)]
+      .map(([, c, d]) => [couleurs.get(c), d] as const);
+    assert.ok(tracés.length > 0, 'le SVG source doit contenir des tracés');
+    for (const [fill, d] of tracés) {
+      assert.ok(fill !== undefined, 'chaque classe du SVG source doit avoir une couleur');
+      assert.ok(page.includes(`<path fill="${fill}" d="${d}"/>`), `le tracé ${d.slice(0, 20)}... manque ou a change de couleur`);
+    }
+    assert.equal(
+      (page.match(/<svg class="logo" viewBox="([^"]+)"/) ?? [])[1],
+      (source.match(/viewBox="([^"]+)"/) ?? [])[1],
+      'le viewBox de la page doit suivre la source',
+    );
+    // Les anciennes routes d'image ont disparu : plus rien a servir.
+    for (const route of ['/icon.svg', '/apple-touch-icon.png']) {
+      const reponse = await fetch(client.server.url.replace(/\/$/, '') + route);
+      assert.equal(reponse.status, 404, `${route} ne doit plus exister`);
+    }
     // Une ressource inconnue est refusee, comme un chemin hors de `assets`.
     assert.equal((await fetch(client.server.url + 'absent.css')).status, 404);
     assert.equal((await fetch(client.server.url.replace(/\/$/, '') + '/../package.json')).status, 404);

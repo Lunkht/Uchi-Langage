@@ -27,23 +27,13 @@ import { parse } from '../parser/parser.ts';
 import { collectGrammar, type Grammar } from './grammar.ts';
 
 const ASSET_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'assets');
-const PROJECT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-
-/** Ressources servies depuis la racine du projet, comme l'icone. */
-const PROJECT_ASSETS: Record<string, string> = {
-  '/icon.svg': 'logo_uchi.svg',
-  '/apple-touch-icon.png': 'logo_uchi.png',
-};
 
 /** Types MIME des ressources servies. */
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
   '.json': 'application/json; charset=utf-8',
-  '.ico': 'image/x-icon',
 };
 
 export interface GuiOptions {
@@ -259,16 +249,6 @@ async function handle(
   // L'API n'accepte que les methodes prevues.
   if (method !== 'GET' && method !== 'HEAD') {
     sendJson(response, 405, { error: 'methode non autorisee' });
-    return;
-  }
-  const projectAsset = PROJECT_ASSETS[route];
-  if (projectAsset !== undefined) {
-    const file = join(PROJECT_DIR, projectAsset);
-    if (!existsSync(file)) {
-      send(response, 404, 'text/plain; charset=utf-8', 'introuvable');
-      return;
-    }
-    send(response, 200, CONTENT_TYPES[extname(file)] ?? 'application/octet-stream', readFileSync(file));
     return;
   }
   const name = route === '/' ? '/index.html' : route;
