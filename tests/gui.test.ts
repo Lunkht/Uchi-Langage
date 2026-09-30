@@ -97,6 +97,14 @@ test('l\'editeur sert sa page et ses ressources', async () => {
     assert.match(page, /<svg class="logo" viewBox="0 0 75 74"/);
     assert.match(page, /<link rel="icon" type="image\/svg\+xml" href="data:image\/svg\+xml,/);
     assert.match(page, /<link rel="apple-touch-icon" href="data:image\/png;base64,/);
+    // Le PNG est lui aussi une source, pas un degrade : il doit correspondre au
+    // bit pres, sinon la page montre un logo que le depot ne contient plus.
+    const tactile = page.match(/rel="apple-touch-icon" href="data:image\/png;base64,([^"]+)"/);
+    assert.ok(tactile !== null, 'l\'icone tactile doit etre lisible dans la page');
+    assert.ok(
+      Buffer.from(tactile[1], 'base64').equals(readFileSync(join(PROJECT, 'logo_uchi.png'))),
+      'l\'icone tactile de la page doit etre logo_uchi.png, au bit pres',
+    );
     // Le SVG in-line et le favicon doivent venir du meme logo, trait pour
     // trait, couleur comprise : le fichier de la page peut deriver du source
     // sans qu'aucun test ne le voie autrement.
