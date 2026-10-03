@@ -25,6 +25,13 @@ import type { RunRequest, RunResult } from '../execution/protocol.ts';
 import { EXTENSION, LANGUAGE } from '../language.ts';
 import { parse } from '../parser/parser.ts';
 import { collectGrammar, type Grammar } from './grammar.ts';
+import {
+  createRequestGuard,
+  injectToken,
+  securityHeaders,
+  TOKEN_HEADER,
+  type RequestGuard,
+} from '../request-guard.ts';
 
 const ASSET_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'assets');
 
@@ -176,11 +183,12 @@ export function startGuiServer(options: GuiOptions): Promise<GuiServer> {
   if (!existsSync(root) || !statSync(root).isDirectory()) {
     return Promise.reject(new Error(`dossier de travail introuvable : '${root}'`));
   }
-  mkdirSync(join(root, '.uchi-cache'), { recursive: true });
   const contexte: Contexte = {
     root,
     grammar: collectGrammar(),
     runTimeout: options.runTimeout ?? DEFAULT_RUN_TIMEOUT,
+    maxRuns: Math.max(1, options.maxConcurrentRuns ?? DEFAULT_MAX_RUNS),
+    activeRuns: 0,
     // Renseigne a l'ecoute, quand le port est connu.
     hotes: null,
   };
